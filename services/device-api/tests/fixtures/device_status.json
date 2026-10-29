@@ -1,0 +1,25 @@
+{
+  "ReaxiumParameters": {
+    "DeviceStatus": {
+      "device_imei": "registered-device",
+      "user_id": 1,
+      "business_id": 1,
+      "status_date": "2026-10-20 10:00:00",
+      "device_status": {
+        "temperature": 30,
+        "battery_power_level": 85,
+        "is_charging": 0,
+        "installed_app_version": "1.0.0",
+        "bus_info": "TEST-BUS"
+      },
+      "device_location": {
+        "latitude": 33.5731,
+        "longitude": -7.5898,
+        "speed": 0,
+        "bearing": 0,
+        "accuracy": 10,
+        "lag_time": 0
+      }
+    }
+  }
+}
