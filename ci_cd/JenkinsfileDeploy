@@ -1,0 +1,58 @@
+// Same deployment parameters and Vault SSH/machine credentials as Java develop.
+node {
+    properties([disableConcurrentBuilds(), parameters([
+        string(name: 'CLIENT', defaultValue: '', description: 'Client identifier, e.g. MARTIN_COUNTY'),
+        choice(name: 'ENVIRONMENT', choices: ['DEV', 'PROD'], description: 'Target environment'),
+        choice(name: 'DEPLOYMENT_TYPE', choices: ['FULL_STACK', 'APPLICATION_ONLY', 'CLEAN_DEPLOYMENT'], description: 'Deployment scope'),
+        string(name: 'IMAGE_VERSION', defaultValue: 'LATEST', description: 'LATEST uses VERSION; explicit tags support rollback'),
+        booleanParam(name: 'FORCE_DEPLOYMENT', defaultValue: false, description: 'Force API task recreation')
+    ])])
+    def client = params.CLIENT
+    def target = params.ENVIRONMENT
+    def type = params.DEPLOYMENT_TYPE
+    def version = params.IMAGE_VERSION?.trim()
+    if (!client || !(client ==~ /[A-Za-z0-9_]+/)) error('Invalid CLIENT')
+    if (!(target in ['DEV', 'PROD'])) error('Invalid ENVIRONMENT')
+    if (!(type in ['FULL_STACK', 'APPLICATION_ONLY', 'CLEAN_DEPLOYMENT'])) error('Invalid DEPLOYMENT_TYPE')
+    if (version && version != 'LATEST' && !(version ==~ /[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}/)) error('Invalid IMAGE_VERSION')
+    stage('Repository Setup') {
+        checkout scm
+        checkout([$class: 'GitSCM', branches: [[name: '*/develop']], userRemoteConfigs: scm.userRemoteConfigs])
+        sh 'git archive --format=tar -o deployment.tar HEAD ci_cd VERSION'
+    }
+    withVault(configuration: [vaultUrl: 'http://vault:8200', vaultCredentialId: 'vault-token', timeout: 60], vaultSecrets: [
+        [path: "kv/jenkins/${target}_SSH_PRIVATE_KEY", engineVersion: 2, secretValues: [
+            [envVar: 'SSH_USERNAME', vaultKey: 'username'], [envVar: 'SSH_PRIVATE_KEY', vaultKey: 'private_key']]],
+        [path: 'kv/jenkins/MACHINE', engineVersion: 2, secretValues: [[envVar: 'HOST_IP', vaultKey: "${client}_${target}_IP"]]]
+    ]) {
+        def key = "${pwd(tmp: true)}/vault_ssh_key.pem"
+        try {
+            writeFile file: key, text: env.SSH_PRIVATE_KEY
+            withEnv(["KEY_FILE=${key}"]) { sh 'chmod 600 "$KEY_FILE"' }
+            // Matches the Java SSH Steps configuration; use knownHosts when provisioned.
+            def remote = [name: "${client}_${target}", host: env.HOST_IP, user: env.SSH_USERNAME,
+                          identityFile: key, allowAnyHosts: true]
+            def directory = "/home/ubuntu/installation/git_base_files/driver_app_api/${client}_${target}"
+            stage('Remote Repository Setup') {
+                sshCommand remote: remote, command: "mkdir -p '${directory}'"
+                sshPut remote: remote, from: 'deployment.tar', into: directory
+                sshCommand remote: remote, command: "cd '${directory}' && tar -xf deployment.tar && rm deployment.tar"
+            }
+            def arguments = "--client ${client} --env ${target} " + (type == 'APPLICATION_ONLY' ? '--app' : '--all')
+            if (version && version != 'LATEST') arguments += " --version ${version}"
+            if (params.FORCE_DEPLOYMENT) arguments += ' --force'
+            stage('Deployment Execution') {
+                if (type == 'CLEAN_DEPLOYMENT') {
+                    sshCommand remote: remote, command: "cd '${directory}' && bash ci_cd/deploy.sh --remove"
+                }
+                sshCommand remote: remote, command: "cd '${directory}' && bash ci_cd/deploy.sh ${arguments}"
+            }
+            stage('Post-Deployment Verification') {
+                sshCommand remote: remote, command: "cd '${directory}' && bash ci_cd/deploy.sh --status"
+            }
+            currentBuild.displayName = "${client}_${target}_${version ?: 'LATEST'}"
+        } finally {
+            withEnv(["KEY_FILE=${key}"]) { sh 'rm -f "$KEY_FILE" deployment.tar' }
+        }
+    }
+}

@@ -1,0 +1,4 @@
+FROM rabbitmq:3-management
+RUN apt-get update && apt-get install -y --no-install-recommends python3 ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY ci_cd/vault-entrypoint.py /usr/local/bin/vault-entrypoint.py
+ENTRYPOINT ["python3", "/usr/local/bin/vault-entrypoint.py", "rabbitmq"]

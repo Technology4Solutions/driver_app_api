@@ -1,0 +1,52 @@
+// Same Vault / semantic-version workflow as reaxium-device-api develop.
+node {
+    properties([disableConcurrentBuilds(), parameters([
+        choice(name: 'BUILD_SIZE', choices: ['PATCH', 'MINOR', 'MAJOR'], description: 'Semantic version increment')
+    ])])
+    def bump = (params.BUILD_SIZE ?: 'PATCH').toLowerCase()
+    if (!(bump in ['patch', 'minor', 'major'])) error('Invalid BUILD_SIZE')
+    withVault(configuration: [vaultUrl: 'http://vault:8200', vaultCredentialId: 'vault-token', timeout: 60], vaultSecrets: [
+        [path: 'kv/jenkins/GITHUB_TOKEN', engineVersion: 2, secretValues: [[envVar: 'VAULT_GH_TOKEN', vaultKey: 'token']]],
+        [path: 'kv/jenkins/HUB_DOCKER', engineVersion: 2, secretValues: [
+            [envVar: 'DOCKER_USERNAME', vaultKey: 'username'], [envVar: 'DOCKER_PASSWORD', vaultKey: 'password']]]
+    ]) {
+        withEnv(["BUILD_INCREMENT=${bump}", "REPOSITORY_URL=${env.REPOSITORY_URL ?: 'https://github.com/Technology4Solutions/driver_app_api.git'}",
+                 "GIT_ASKPASS=${pwd(tmp: true)}/git-askpass", 'GIT_TERMINAL_PROMPT=0', "DOCKER_CONFIG=${pwd(tmp: true)}/docker-auth"]) {
+            try {
+                writeFile file: env.GIT_ASKPASS, text: '''#!/bin/sh
+case "$1" in *Username*) printf '%s\\n' 'x-access-token' ;; *) printf '%s\\n' "$VAULT_GH_TOKEN" ;; esac
+'''
+                sh 'chmod 700 "$GIT_ASKPASS"'
+                stage('Repository Setup') {
+                    dir('source') {
+                        deleteDir()
+                        sh 'git clone --branch develop --single-branch "$REPOSITORY_URL" .'
+                    }
+                }
+                stage('Docker Authentication') {
+                    sh '''set +x
+mkdir -p "$DOCKER_CONFIG"
+chmod 700 "$DOCKER_CONFIG"
+printf '%s' "$DOCKER_PASSWORD" | docker login --username "$DOCKER_USERNAME" --password-stdin
+'''
+                }
+                dir('source') {
+                    stage('Pre-Build Versions') { sh 'bash ci_cd/build.sh --versions' }
+                    stage('Build Execution') { sh 'bash ci_cd/build.sh -t "$BUILD_INCREMENT" --platform linux/amd64' }
+                    stage('Commit Version Update') {
+                        sh '''
+git config user.name reaxiumapps
+git config user.email reaxiumapps@t4ss.com
+git add VERSION
+git commit -m "Build ($BUILD_INCREMENT): bump version to $(cat VERSION) [skip ci]"
+git push origin HEAD:develop
+'''
+                    }
+                    currentBuild.displayName = "driver_app_api ${readFile('VERSION').trim()}"
+                }
+            } finally {
+                sh 'rm -f "$GIT_ASKPASS" "$DOCKER_CONFIG/config.json"'
+            }
+        }
+    }
+}
