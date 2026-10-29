@@ -63,6 +63,9 @@ from pathlib import Path
 a=sys.argv[1:]
 with open(os.environ['MOCK_LOG'],'a') as f:f.write(' '.join(a)+'\\n')
 if os.getenv('MOCK_FAIL') and a[0]=='push':sys.exit(1)
+if os.getenv('MOCK_PULL_FAIL') and a[0]=='pull':sys.exit(1)
+if os.getenv('MOCK_SECRET_MISSING') and a[:2]==['secret','inspect']:sys.exit(1)
+if a[:2]==['service','ls'] and not os.getenv('MOCK_EMPTY_STACK'):print('driver_app_api_stack_driver-app-api')
 if a[0]=='info':print('active' if 'LocalNodeState' in a[-1] else 'true')
 if a[:2]==['stack','services']:
  for name in ['driver-app-api','driver-app-rabbitmq','driver-app-redis']:print('driver_app_api_stack_'+name+' 1/1')
@@ -102,8 +105,27 @@ if a[:2]==['service','inspect'] and '--format' in a:
         self.assertIn('--force', calls)
 
     def test_rollback_and_invalid_environment_fail(self):
-        self.assertNotEqual(self.run_script('deploy.sh', '--client', 'TEST', '--env', 'DEV', MOCK_STATE='rollback_completed').returncode, 0)
+        result = self.run_script('deploy.sh', '--client', 'TEST', '--env', 'DEV', MOCK_STATE='rollback_completed')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('waiting for stack', result.stderr)
+        self.assertIn('stack ps --no-trunc', self.log.read_text())
         self.assertNotEqual(self.run_script('deploy.sh', '--client', 'TEST', '--env', 'invalid').returncode, 0)
+
+    def test_app_only_bootstraps_missing_stack(self):
+        result = self.run_script('deploy.sh', '--client', 'TEST', '--env', 'DEV', '--app', '--force', MOCK_EMPTY_STACK='1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('first deployment', result.stdout)
+        self.assertIn('stack deploy', self.log.read_text())
+        self.assertIn('pull reaxiumapps/driver_app_api-rabbitmq:1.2.3', self.log.read_text())
+
+    def test_preflight_errors_identify_failing_stage(self):
+        for setting, message in [('MOCK_PULL_FAIL', 'pulling API image'),
+                                 ('MOCK_SECRET_MISSING', 'VAULT_TOKEN Swarm secret')]:
+            self.log.write_text('')
+            result = self.run_script('deploy.sh', '--client', 'TEST', '--env', 'DEV', **{setting: '1'})
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(message, result.stderr)
+            self.assertNotIn('stack deploy', self.log.read_text())
 
 
 if __name__ == '__main__':

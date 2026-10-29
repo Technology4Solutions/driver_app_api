@@ -368,9 +368,13 @@ bash ci_cd/deploy.sh --remove
 python3 ci_cd/test-deployment.py
 ```
 
-`--app` updates only the API; `--all` updates the complete Rust stack. `--force`
+`--app` updates only the API in an existing stack. When the stack has no services,
+it creates the full stack for the first deployment. A partial stack missing its API
+requires `--all` (Jenkins `FULL_STACK`) to repair it. `--all` updates the complete Rust stack. `--force`
 recreates API tasks. CLEAN_DEPLOYMENT removes the stack first and preserves volumes.
 Rollbacks, paused updates and convergence timeouts fail the deployment job. The
+script reports the failing deployment stage and prints service/task status on
+convergence failures so Jenkins shows Docker errors before the SSH exception. The
 health check verifies the HTTP listener after startup, not ongoing dependency health.
 Tests in test-deployment.py are offline; Jenkins/Vault/Swarm integration requires
 configured infrastructure. Ignored database integration tests remain in GitHub CI.
