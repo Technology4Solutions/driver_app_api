@@ -66,7 +66,7 @@ notification policies. Existing Prometheus rules in `monitoring/alerts.yml` rema
 separate and do not send these Slack notifications.
 
 On a deployment server, copy/run the same setup script and apply with
-`docker compose -f monitoring/compose.swarm.yaml up -d --force-recreate grafana`.
+`bash ci_cd/monitoring.sh start`.
 The webhook and generated rules are local to that server and are not committed.
 
 If using the SSH setup, keep your tunnel running in another terminal:

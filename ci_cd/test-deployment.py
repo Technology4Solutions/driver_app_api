@@ -90,13 +90,16 @@ if os.getenv('MOCK_FAIL') and a[0]=='push':sys.exit(1)
 if os.getenv('MOCK_NO_COMPOSE') and a[0]=='compose':sys.exit(1)
 if os.getenv('MOCK_PULL_FAIL') and a[0]=='pull':sys.exit(1)
 if os.getenv('MOCK_SECRET_MISSING') and a[:2]==['secret','inspect']:sys.exit(1)
-if os.getenv('MOCK_MONITORING_FAIL') and a[0]=='compose' and 'up' in a:sys.exit(1)
-if a[:2]==['service','ls'] and not os.getenv('MOCK_EMPTY_STACK'):print('driver_app_api_stack_driver-app-api')
+if os.getenv('MOCK_MONITORING_FAIL') and a[:2]==['stack','deploy'] and a[-1].endswith('_monitoring'):sys.exit(1)
+if a[0]=='ps':print('mock-container')
+if a[0]=='inspect':print('healthy')
+if a[:2]==['service','ls'] and not any('_monitoring' in x for x in a) and not os.getenv('MOCK_EMPTY_STACK'):print('driver_app_api_stack_driver-app-api')
 if a[0]=='info':print('active' if 'LocalNodeState' in a[-1] else 'true')
 if a[:2]==['stack','services']:
  for name in ['driver-app-api','driver-app-rabbitmq','driver-app-redis']:print('driver_app_api_stack_'+name+' 1/1')
 if a[:2]==['service','inspect'] and '--format' in a:
  fmt=a[a.index('--format')+1]
+ if os.getenv('MOCK_MONITORING_PAUSED') and '_monitoring_' in a[-1]:print('paused');sys.exit(0)
  print('reaxiumapps/driver_app_api:1.2.3@sha256:mock' if 'ContainerSpec.Image' in fmt else os.getenv('MOCK_STATE','completed'))
 ''')
         mock.chmod(0o755)
@@ -104,7 +107,7 @@ if a[:2]==['service','inspect'] and '--format' in a:
 
     def run_script(self, name, *args, **env):
         return subprocess.run(['bash', str(self.path / 'ci_cd' / name), *args],
-                              env=dict(self.env, **env), capture_output=True, text=True, timeout=10)
+                              env=dict(self.env, **env), capture_output=True, text=True, timeout=30)
 
     def test_versioning_and_failed_push(self):
         for bump, expected in [('patch','1.2.4'), ('minor','1.3.0'), ('major','2.0.0')]:
@@ -126,10 +129,10 @@ if a[:2]==['service','inspect'] and '--format' in a:
         result = self.run_script('deploy.sh', '--client', 'TEST', '--env', 'DEV', '--app', '--force')
         self.assertEqual(result.returncode, 0, result.stderr)
         calls = self.log.read_text()
-        self.assertNotIn('stack deploy', calls)
+        self.assertNotIn('-c ci_cd/docker-compose.swarm.yml', calls)
         self.assertIn('service update', calls)
         self.assertIn('--force', calls)
-        self.assertIn('up -d --pull always --force-recreate --wait', calls)
+        self.assertIn('-c monitoring/stack.yml driver_app_api_stack_monitoring', calls)
         self.assertIn('--env-add VAULT_BASE_PATH=reaxium_ci/device_api', calls)
 
     def test_app_update_preserves_explicit_vault_path(self):
@@ -147,12 +150,11 @@ if a[:2]==['service','inspect'] and '--format' in a:
         self.assertIn('push reaxiumapps/driver_app_api-rabbitmq:1.2.4', calls)
         self.assertEqual((self.path / 'VERSION').read_text().strip(), '1.2.4')
 
-    def test_deploy_without_compose_fails_before_changes(self):
+    def test_deploy_without_compose(self):
         result = self.run_script('deploy.sh', '--client', 'TEST', '--env', 'DEV', MOCK_NO_COMPOSE='1')
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn('on the deployment server', result.stderr)
-        self.assertNotIn('stack deploy', self.log.read_text())
-        self.assertNotIn('service update', self.log.read_text())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn('compose ', self.log.read_text())
+        self.assertIn('-c monitoring/stack.yml', self.log.read_text())
 
     def test_monitoring_failure_fails_deployment(self):
         result = self.run_script('deploy.sh', '--client', 'TEST', '--env', 'PROD', MOCK_MONITORING_FAIL='1')
@@ -168,8 +170,14 @@ if a[:2]==['service','inspect'] and '--format' in a:
         result = self.run_script('monitoring.sh', 'stop')
         self.assertEqual(result.returncode, 0, result.stderr)
         calls = self.log.read_text()
-        self.assertIn('down', calls)
+        self.assertIn('stack rm driver_app_api_stack_monitoring', calls)
         self.assertNotIn('--volumes', calls)
+
+    def test_paused_monitoring_fails_with_task_diagnostics(self):
+        result = self.run_script('monitoring.sh', 'start', MOCK_MONITORING_PAUSED='1')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Monitoring update failed', result.stderr)
+        self.assertIn('stack ps --no-trunc driver_app_api_stack_monitoring', self.log.read_text())
 
     def test_rollback_and_invalid_environment_fail(self):
         result = self.run_script('deploy.sh', '--client', 'TEST', '--env', 'DEV', MOCK_STATE='rollback_completed')

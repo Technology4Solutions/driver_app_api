@@ -385,50 +385,55 @@ python3 ci_cd/test-deployment.py
 
 ### Deployment monitoring with Grafana
 
-`/metrics` is the raw Prometheus feed. Build and deploy a new API image to enable
-the new Linux process CPU, resident memory, threads, file descriptor and uptime
-metrics. CPU at 100% means one CPU core; memory is API process memory, not total
-server or container memory.
+DEV and PROD use Docker Swarm commands (`docker stack deploy`, `docker service`),
+matching reaxium-device-api. Neither the Jenkins build agent nor the deployment
+server needs the Compose plugin. Local development still uses Docker Compose.
+Jenkins includes monitoring and the optional Slack setup script in its bundle.
 
-Jenkins includes monitoring and the optional Slack setup script in its deployment
-bundle. Both DEV and PROD deployments automatically start/update Prometheus and
-Grafana after API convergence, including APPLICATION_ONLY deployments. Deployment
-validates the monitoring Compose configuration before making changes, pulls the
-pinned monitoring images and waits for their health checks. Docker Compose 2.24+
-is required on the target manager only; the Jenkins image build needs the Docker
-CLI without Compose. No Slack webhook is required.
+After API convergence, every deployment starts/updates a separate monitoring
+stack named `<API_STACK>_monitoring`, including APPLICATION_ONLY deployments.
+Prometheus and Grafana are pinned to the deployment manager, where their files
+and persistent volumes live. Readiness requires healthy containers. Configuration
+is reapplied on every deployment; no Slack webhook is required.
 
-For a manual monitoring restart on the Swarm manager, run:
+Prometheus discovers all API replicas on internal port 9090 and retains 15 days
+of metrics. CPU is measured per process (100% = one core); resident memory is API
+process memory, not total host/container memory. Build a new API image to include
+these process metrics if the deployed version predates them.
+
+Manual commands on the deployment manager, from the deployment directory:
 
 ```bash
-cd /home/ubuntu/installation/git_base_files/driver_app_api/MARTIN_COUNTY_DEV
 bash ci_cd/monitoring.sh start
+bash ci_cd/monitoring.sh status
+# For a custom API stack, append its name to these commands.
 ```
 
-This joins the existing attachable overlay network and discovers every API replica
-on internal port 9090. The deployment generates task DNS configuration for its stack name; for manual
-use pass it as `bash ci_cd/monitoring.sh start CUSTOM_STACK`. Prometheus retains 15 days of metrics in a volume.
-Grafana settings also persist in a volume. Neither service is publicly exposed.
-
-From your laptop, open an SSH tunnel (replace `SERVER_IP`):
+Monitoring ports are not published. On the manager, get Grafana's container IP:
 
 ```bash
-ssh -N -L 3000:127.0.0.1:3000 -L 9091:127.0.0.1:9091 ubuntu@SERVER_IP
+docker ps --filter label=com.docker.swarm.service.name=driver_app_api_stack_monitoring_grafana
+# Replace CONTAINER_ID with the ID from the previous command:
+docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' CONTAINER_ID
+```
+
+From your laptop, replace GRAFANA_CONTAINER_IP and SERVER_IP:
+
+```bash
+ssh -N -L 3000:GRAFANA_CONTAINER_IP:3000 ubuntu@SERVER_IP
 ```
 
 Open http://localhost:3000, log in initially with `admin` / `admin`, change the
-password when prompted, and open **Dashboards → Device API**. The dashboard shows
-request rate, mean/p95/p99 response time, status codes, error ratio, availability,
-CPU, resident memory, uptime, threads and file descriptors per API replica.
-Rates need at least two scrapes and HTTP graphs need traffic. If graphs are empty,
-check http://localhost:9091/targets: each API replica should be UP.
+password, and open **Dashboards → Device API**. The container IP can change after
+redeployment; obtain it again when needed. Use the same procedure with the
+Prometheus container and port 9090 to access its `/targets` page.
 
-Monitoring configuration is reapplied automatically on each deployment.
-`deploy.sh --status` includes monitoring status. `deploy.sh --remove` stops
-monitoring and removes the API stack while preserving all data volumes.
-CLEAN_DEPLOYMENT restarts both afterward. To stop only monitoring, use
-`bash ci_cd/monitoring.sh stop`. The setup assumes one client/environment per
-target host, as for the API; DEV and PROD retain separate data on their hosts.
+`deploy.sh --status` includes monitoring. `deploy.sh --remove` removes both
+stacks while preserving volumes; CLEAN_DEPLOYMENT starts both again. To stop
+only monitoring, run `bash ci_cd/monitoring.sh stop`. DEV and PROD use separate
+target hosts, as for the API. Existing monitoring volumes use their original
+names to retain data. If you previously started monitoring manually with Compose,
+stop those old containers before migrating so both stacks do not share live data.
 
 `--app` updates only the API in an existing stack. When the stack has no services,
 it creates the full stack for the first deployment. A partial stack missing its API

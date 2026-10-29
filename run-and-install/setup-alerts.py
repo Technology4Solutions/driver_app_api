@@ -63,7 +63,7 @@ def main():
     target.write_text(json.dumps(configuration(), indent=2) + '\n')
     print('Created five Grafana alerts and the Slack contact point. No notification was sent.')
     print('Apply locally: ./run-and-install/run.sh')
-    print('Apply on server: docker compose -f monitoring/compose.swarm.yaml up -d --force-recreate grafana')
+    print('Apply on server: bash ci_cd/monitoring.sh start')
 
 
 if __name__ == '__main__':
