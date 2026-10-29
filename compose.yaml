@@ -1,0 +1,80 @@
+name: device-api
+services:
+  api:
+    build: .
+    # Linux: share the host network to reach the local SSH tunnel.
+    network_mode: host
+    environment:
+      API_BIND: ${API_BIND:-127.0.0.1:8080}
+      ADMIN_BIND: ${ADMIN_BIND:-127.0.0.1:9090}
+      RUST_LOG: ${RUST_LOG:-info,tower_http=debug}
+      DB_HOST: ${DB_HOST:?Set DB_HOST in .env}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_NAME: ${DB_NAME:?Set DB_NAME in .env}
+      DB_USER: ${DB_USER:?Set DB_USER in .env}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      DB_MAX_CONNECTIONS: ${DB_MAX_CONNECTIONS:-5}
+      DB_CONNECT_TIMEOUT_SECONDS: ${DB_CONNECT_TIMEOUT_SECONDS:-10}
+      REAXIUM_API_USER: ${REAXIUM_API_USER:-}
+      REAXIUM_API_PASSWORD: ${REAXIUM_API_PASSWORD:-}
+      REAXIUM_API_PASSWORD_PREVIOUS: ${REAXIUM_API_PASSWORD_PREVIOUS:-}
+      REAXIUM_API_BASIC_AUTH_USERNAME: ${REAXIUM_API_BASIC_AUTH_USERNAME:-}
+      REAXIUM_API_BASIC_AUTH_PASSWORD: ${REAXIUM_API_BASIC_AUTH_PASSWORD:-}
+      DASHBOARD_BROADCAST_ENABLED: ${DASHBOARD_BROADCAST_ENABLED:-true}
+      DEVICE_STATUS_ZMQ_ENDPOINT: ${DEVICE_STATUS_ZMQ_ENDPOINT:-tcp://127.0.0.1:5555}
+      DEVICE_STATUS_BROADCAST_TIMEOUT_SECONDS: ${DEVICE_STATUS_BROADCAST_TIMEOUT_SECONDS:-5}
+      APP_ENV: ${APP_ENV:-local}
+      BROADCAST_ENABLED: ${BROADCAST_ENABLED:-}
+      DEVICES_API_EXPORT_DEVICE_STATUS_URL: ${DEVICES_API_EXPORT_DEVICE_STATUS_URL:-}
+      DEVICE_STATUS_BROADCAST_USERNAME: ${DEVICE_STATUS_BROADCAST_USERNAME:-}
+      DEVICE_STATUS_BROADCAST_PASSWORD: ${DEVICE_STATUS_BROADCAST_PASSWORD:-}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://guest:guest@127.0.0.1:5674/%2f}
+      REDIS_URL: ${REDIS_URL:-redis://127.0.0.1:6381/}
+      DEVICE_STATUS_QUEUE: ${DEVICE_STATUS_QUEUE:-devicesAPIQueue}
+      DEVICE_STATUS_EXCHANGE: ${DEVICE_STATUS_EXCHANGE:-devicesAPIExchange}
+      DEVICE_STATUS_ROUTING_KEY: ${DEVICE_STATUS_ROUTING_KEY:-reaxium.devices.api.#}
+      DEVICE_STATUS_MIN_UPDATE_INTERVAL_SECONDS: ${DEVICE_STATUS_MIN_UPDATE_INTERVAL_SECONDS:-15}
+      VISION_ENABLED: ${VISION_ENABLED:-true}
+      VISION_UDP_DESTINATION: ${VISION_UDP_DESTINATION:-}
+      VISION_TIMEZONE: ${VISION_TIMEZONE:-America/New_York}
+    stop_grace_period: 30s
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports: ["127.0.0.1:5674:5672", "127.0.0.1:15674:15672"]
+    volumes: ["rabbitmq-data:/var/lib/rabbitmq"]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_listener", "5672"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+  redis:
+    image: redis:7.2-alpine
+    ports: ["127.0.0.1:6381:6379"]
+    volumes: ["redis-data:/data"]
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    profiles: [monitoring]
+    volumes: ["./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro", "./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro"]
+    ports: ["127.0.0.1:9091:9090"]
+    depends_on: [api]
+  grafana:
+    image: grafana/grafana:12.1.0
+    profiles: [monitoring]
+    ports: ["127.0.0.1:3000:3000"]
+    volumes: ["./monitoring/grafana:/etc/grafana/provisioning:ro", "grafana-data:/var/lib/grafana"]
+    depends_on: [prometheus]
+volumes:
+  rabbitmq-data:
+  redis-data:
+  grafana-data:
