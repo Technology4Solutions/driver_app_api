@@ -4,7 +4,7 @@ set -euo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 if [[ "${1:-}" == --help || $# -gt 1 ]]; then
   echo "Usage: $0 [DATASET.json]"
-  echo 'Defaults: devices.local.json, VUS=1, JOURNEYS=1. SERVICE=journey|beginARoute|endARoute|deviceStatus. Prompts for missing API settings.'
+  echo 'Defaults: devices.local.json, VUS=1, JOURNEYS=1. SERVICE=journey|beginARoute|startARoute|endARoute|deviceStatus. startARoute aliases beginARoute. Prompts for missing API settings.'
   exit 0
 fi
 dataset="${1:-$script_dir/../devices.local.json}"

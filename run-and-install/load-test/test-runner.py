@@ -57,13 +57,14 @@ try:
                 assert records and all(path.endswith('beginARoute') for path,_ in records)
             print(f'PASS: {mode}')
         mode = 'success'
-        for service in ['beginARoute', 'endARoute', 'deviceStatus']:
+        for service in ['beginARoute', 'startARoute', 'endARoute', 'deviceStatus']:
             records.clear()
             env['SERVICE'] = service
             result = subprocess.run([str(Path(__file__).with_name('run.sh').resolve()),str(fixture)],env=env,text=True,capture_output=True,timeout=90)
             assert result.returncode == 0, result.stdout + result.stderr
             assert len(records) == 4
-            expected_path='/device/DeviceStatus/update' if service == 'deviceStatus' else '/DeviceTraffic/' + service
+            endpoint = 'beginARoute' if service == 'startARoute' else service
+            expected_path='/device/DeviceStatus/update' if service == 'deviceStatus' else '/DeviceTraffic/' + endpoint
             assert all(path == expected_path for path,_ in records)
             if service == 'deviceStatus':
                 assert all('device_imei' in payload and 'device_location' in payload and 'device_status' in payload for _,payload in records)

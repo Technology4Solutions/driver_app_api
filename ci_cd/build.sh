@@ -23,6 +23,7 @@ case "$bump" in
   *) echo 'Invalid version increment' >&2; exit 1 ;;
 esac
 version="$major.$minor.$patch"
+bash ci_cd/monitoring.sh check
 for component in api rabbitmq; do
   image=reaxiumapps/driver_app_api; file=ci_cd/Dockerfile
   if [[ "$component" == rabbitmq ]]; then image+=-rabbitmq; file+=.rabbitmq; fi

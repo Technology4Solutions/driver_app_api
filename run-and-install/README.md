@@ -11,12 +11,63 @@ Bash, curl, and Python 3. Rust is provided by Docker.
 # Edit .env with your database and shared API credentials.
 ./run-and-install/run.sh
 ./run-and-install/logs.sh
+# Stop the local services when finished:
+./run-and-install/stop.sh
 ```
 
 `build.sh` checks the tools and creates `.env` from `.env.example` only if missing.
-It preserves existing settings, then builds the API image. It does not install system packages or create a database.
-`run.sh` builds and starts/recreates the API. It waits for the container to run;
+It preserves existing settings, builds the API image, and downloads Prometheus and Grafana images.
+It does not install system packages or create a database.
+`run.sh` starts/recreates the API, RabbitMQ, Redis, Prometheus and Grafana without rebuilding.
+Run `build.sh` again after code changes. It waits for the containers to run;
 use `test-api.sh` to verify HTTP readiness. Press Ctrl+C to stop following logs.
+
+Open http://localhost:3000 (initial login `admin` / `admin`) and select
+**Dashboards → Device API** for response times, request rates, errors, CPU and memory.
+Check http://localhost:9091/targets if graphs are empty. Generate API traffic and
+allow at least two 15-second scrapes for rates to appear.
+`stop.sh` stops all five local services and preserves their data volumes.
+
+## Scripted Slack alerts
+
+Create a Slack incoming webhook for your chosen channel, then run from the project root:
+
+```bash
+python3 ./run-and-install/setup-alerts.py
+./run-and-install/run.sh
+```
+
+The script prompts for the webhook without displaying it. It creates the Slack
+contact point and five Grafana-managed rules automatically: API unavailable for
+1 minute (critical), p95 response time above 1 second for 5 minutes (warning), CPU
+above 80% of one core for 5 minutes (warning), resident memory above 750 MiB for
+5 minutes (warning), and HTTP 5xx ratio above 5% for 5 minutes (critical).
+Rules evaluate every minute. Notifications include recovery messages, wait 30
+seconds initially and repeat every 4 hours. HTTP alerts measure HTTP status, not
+application error codes embedded in HTTP 200 responses. Missing API scrape data
+alerts; missing traffic or process data does not trigger the other thresholds.
+
+The webhook is stored in `monitoring/slack.local.env` with mode 600; both that file
+and generated `monitoring/grafana/alerting/device-api.local.json` are Git-ignored
+and excluded from Docker builds. Do not share rendered `docker compose config`
+output: it includes environment values. Docker Compose 2.24+ is required for the
+optional environment file. The script also accepts an already exported
+`SLACK_WEBHOOK_URL`. Do not put a real webhook in a command saved to shell history.
+
+No test message is sent by the setup script. Running Grafana activates the rules
+and notifications. Inspect them in **Alerting → Alert rules**. To test downtime
+locally, run `docker compose stop api`, wait roughly 2–3 minutes, then use
+`./run-and-install/run.sh` to recover. Keep monitoring running throughout the test.
+
+To change thresholds, edit `setup-alerts.py`, rerun it, and run `run.sh` to reload
+Grafana. Provisioned rules are managed through files rather than edited in the UI.
+Rules directly select the project Slack contact point, preserving existing global
+notification policies. Existing Prometheus rules in `monitoring/alerts.yml` remain
+separate and do not send these Slack notifications.
+
+On a deployment server, copy/run the same setup script and apply with
+`docker compose -f monitoring/compose.swarm.yaml up -d --force-recreate grafana`.
+The webhook and generated rules are local to that server and are not committed.
 
 If using the SSH setup, keep your tunnel running in another terminal:
 
@@ -76,9 +127,9 @@ Successful relay submission does not guarantee receipt by every dashboard client
 
 | Script | Purpose |
 | --- | --- |
-| `build.sh` | Check prerequisites, create `.env` if missing, and build the API image |
-| `run.sh` | Build and start/recreate the API |
-| `stop.sh` | Stop only the API |
+| `build.sh` | Check prerequisites, create `.env` if missing, build API, and download monitoring images |
+| `run.sh` | Start API, dependencies and monitoring without rebuilding |
+| `stop.sh` | Stop API, dependencies and monitoring; preserve data volumes |
 | `logs.sh` | Follow the last 100 log lines and new logs |
 | `test-api.sh` | Test the running HTTP endpoints |
 | `test-code.sh` | Run formatting checks, Clippy, and ordinary automated tests in Docker |

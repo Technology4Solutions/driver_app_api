@@ -9,6 +9,7 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 device_count="$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' "$1")"
 export VUS="${VUS:-$device_count}" JOURNEYS="${JOURNEYS:-10}" MAX_DURATION="${MAX_DURATION:-30m}"
 export SERVICE="${SERVICE:-journey}"
+if [[ "$SERVICE" == startARoute ]]; then SERVICE=beginARoute; fi
 case "$SERVICE" in journey|beginARoute|endARoute|deviceStatus) ;; *) echo 'SERVICE must be journey, beginARoute, endARoute, or deviceStatus' >&2; exit 2 ;; esac
 export RUN_ID="${RUN_ID:-$(python3 -c 'import uuid; print(uuid.uuid4().hex)')}"
 dataset="$(realpath -- "$1")"

@@ -54,6 +54,8 @@ class ScriptTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name)
         shutil.copytree(ROOT, self.path / 'ci_cd', ignore=shutil.ignore_patterns('__pycache__'))
+        shutil.copytree(ROOT.parent / 'monitoring', self.path / 'monitoring',
+                        ignore=shutil.ignore_patterns('*.local.*', '*.generated.*'))
         (self.path / 'VERSION').write_text('1.2.3\n')
         self.log = self.path / 'calls'
         mock = self.path / 'docker'
@@ -65,6 +67,7 @@ with open(os.environ['MOCK_LOG'],'a') as f:f.write(' '.join(a)+'\\n')
 if os.getenv('MOCK_FAIL') and a[0]=='push':sys.exit(1)
 if os.getenv('MOCK_PULL_FAIL') and a[0]=='pull':sys.exit(1)
 if os.getenv('MOCK_SECRET_MISSING') and a[:2]==['secret','inspect']:sys.exit(1)
+if os.getenv('MOCK_MONITORING_FAIL') and a[0]=='compose' and 'up' in a:sys.exit(1)
 if a[:2]==['service','ls'] and not os.getenv('MOCK_EMPTY_STACK'):print('driver_app_api_stack_driver-app-api')
 if a[0]=='info':print('active' if 'LocalNodeState' in a[-1] else 'true')
 if a[:2]==['stack','services']:
@@ -103,6 +106,24 @@ if a[:2]==['service','inspect'] and '--format' in a:
         self.assertNotIn('stack deploy', calls)
         self.assertIn('service update', calls)
         self.assertIn('--force', calls)
+        self.assertIn('up -d --pull always --force-recreate --wait', calls)
+
+    def test_monitoring_failure_fails_deployment(self):
+        result = self.run_script('deploy.sh', '--client', 'TEST', '--env', 'PROD', MOCK_MONITORING_FAIL='1')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('starting Prometheus and Grafana', result.stderr)
+        self.assertNotIn('Deployment ready:', result.stdout)
+
+    def test_monitoring_custom_stack_and_stop_preserve_data(self):
+        result = self.run_script('monitoring.sh', 'start', 'custom_stack')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        config = (self.path / 'monitoring/prometheus.generated.yml').read_text()
+        self.assertIn('tasks.custom_stack_driver-app-api', config)
+        result = self.run_script('monitoring.sh', 'stop')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.log.read_text()
+        self.assertIn('down', calls)
+        self.assertNotIn('--volumes', calls)
 
     def test_rollback_and_invalid_environment_fail(self):
         result = self.run_script('deploy.sh', '--client', 'TEST', '--env', 'DEV', MOCK_STATE='rollback_completed')

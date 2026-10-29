@@ -16,6 +16,10 @@ pub struct Metrics {
 impl Metrics {
     pub fn new() -> Result<Self, prometheus::Error> {
         let registry = Registry::new();
+        #[cfg(target_os = "linux")]
+        registry.register(Box::new(
+            prometheus::process_collector::ProcessCollector::for_self(),
+        ))?;
         let requests = IntCounterVec::new(
             Opts::new("http_requests_total", "Completed HTTP requests"),
             &["route", "method", "status"],

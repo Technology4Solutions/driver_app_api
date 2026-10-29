@@ -12,5 +12,6 @@ else
 fi
 echo 'Setup checks passed. Rust does not need to be installed locally.'
 compose build api
-echo 'API image built. If using SSH forwarding, start the database/relay tunnel before running the API.'
+compose --profile monitoring pull prometheus grafana
+echo 'API image built and monitoring images downloaded. If using SSH forwarding, start the database/relay tunnel before running the API.'
 echo "Next: $SCRIPT_DIR/run.sh"

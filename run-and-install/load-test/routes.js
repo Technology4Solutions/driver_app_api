@@ -6,7 +6,8 @@ import { check, sleep } from 'k6';
 import { Rate, Counter } from 'k6/metrics';
 
 const devices = new SharedArray('devices', () => JSON.parse(open(__ENV.DATA_FILE || '/data/devices.json')));
-const service = __ENV.SERVICE || 'journey';
+const requestedService = __ENV.SERVICE || 'journey';
+const service = requestedService === 'startARoute' ? 'beginARoute' : requestedService;
 if (!['journey', 'beginARoute', 'endARoute', 'deviceStatus'].includes(service)) throw new Error('SERVICE must be journey, beginARoute, endARoute, or deviceStatus');
 const vus = Number(__ENV.VUS || devices.length);
 const journeys = Number(__ENV.JOURNEYS || 10);

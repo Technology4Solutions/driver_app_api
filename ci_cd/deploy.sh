@@ -32,8 +32,14 @@ while (($#)); do
   esac
 done
 [[ "$stack" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]] || exit 1
-if [[ "$action" == status ]]; then docker stack services "$stack"; exit; fi
+if [[ "$action" == status ]]; then
+  docker stack services "$stack"
+  bash ci_cd/monitoring.sh status "$stack"
+  exit
+fi
 if [[ "$action" == remove ]]; then
+  stage='stopping monitoring (preserving volumes)'
+  bash ci_cd/monitoring.sh stop "$stack"
   docker stack rm "$stack"
   for ((i=0;i<60;i++)); do
     [[ -z $(docker service ls --filter "label=com.docker.stack.namespace=$stack" -q) ]] && exit 0
@@ -45,6 +51,8 @@ fi
 version=${version:-$(tr -d '[:space:]' < VERSION)}
 [[ "$version" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}$ ]] || exit 1
 export CLIENT="$client" ENVIRONMENT="$environment" API_VERSION="$version"
+stage='validating monitoring configuration (Docker Compose 2.24+ required)'
+bash ci_cd/monitoring.sh check "$stack"
 stage='checking the Docker Swarm manager'
 if [[ $(docker info --format '{{.Swarm.LocalNodeState}}') == inactive ]]; then docker swarm init; fi
 [[ $(docker info --format '{{.Swarm.ControlAvailable}}') == true ]] || { echo 'A Swarm manager is required' >&2; exit 1; }
@@ -95,6 +103,8 @@ for ((i=0;i<60;i++)); do
   done < <(docker stack services "$stack" --format '{{.Name}} {{.Replicas}}')
   actual=$(docker service inspect --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}' "$service")
   if $ready && ((count >= 3)) && [[ "$actual" == "$image" || "$actual" == "$image@sha256:"* ]]; then
+    stage='starting Prometheus and Grafana'
+    bash ci_cd/monitoring.sh start "$stack"
     echo "Deployment ready: $stack version $version"; exit 0
   fi
   sleep 5

@@ -117,6 +117,7 @@ SERVICE=beginARoute VUS=1 JOURNEYS=1 ./load-test/start.sh
 SERVICE=endARoute VUS=1 JOURNEYS=1 ./load-test/start.sh
 ```
 
+`SERVICE=startARoute` is also accepted as an alias for `beginARoute`.
 `SERVICE=journey` (the default) calls both endpoints. In single-service mode,
 JOURNEYS means repetitions per device: VUS=8 JOURNEYS=10 sends 80 requests to only
 the selected endpoint. The summary shows `service_iterations_completed`, not

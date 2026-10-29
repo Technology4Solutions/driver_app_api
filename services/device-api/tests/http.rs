@@ -51,5 +51,13 @@ async fn monitoring_is_separate_and_observes_requests() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let text = std::str::from_utf8(&body).unwrap();
     assert!(text.contains("http_requests_total"));
+    #[cfg(target_os = "linux")]
+    for metric in [
+        "process_cpu_seconds_total",
+        "process_resident_memory_bytes",
+        "process_threads",
+    ] {
+        assert!(text.contains(metric), "Missing process metric: {metric}");
+    }
     assert!(text.contains("route=\"/\""));
 }
