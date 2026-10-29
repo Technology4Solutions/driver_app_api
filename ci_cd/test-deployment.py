@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Offline checks: no Docker daemon, Vault server, or credentials needed."""
 import importlib.util
+import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch, MagicMock
 
 ROOT = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location('entrypoint', ROOT / 'vault-entrypoint.py')
@@ -15,6 +17,26 @@ spec.loader.exec_module(module)
 
 
 class ConfigurationTests(unittest.TestCase):
+    def test_shared_vault_path_and_override(self):
+        for mode in ('api', 'rabbitmq'):
+            for environment in ('DEV', 'PROD'):
+                for override in (None, 'custom/device_api'):
+                    env = dict(CLIENT='MARTIN_COUNTY', ENVIRONMENT=environment)
+                    if override:
+                        env['VAULT_BASE_PATH'] = override
+                    response = MagicMock()
+                    response.__enter__.return_value = response
+                    response.read.return_value = json.dumps({'data': {'data': self.bundle()}}).encode()
+                    with patch.dict(os.environ, env, clear=True), \
+                         patch.object(module.sys, 'argv', ['entrypoint', mode]), \
+                         patch.object(module.Path, 'read_text', return_value='test-token'), \
+                         patch.object(module, 'urlopen', return_value=response) as request, \
+                         patch.object(module.os, 'execvpe'):
+                        module.main()
+                    base = override or 'reaxium_ci/device_api'
+                    self.assertEqual(request.call_args.args[0].full_url,
+                                     f'https://vault.reaxium.com/v1/kv/data/{base}/MARTIN_COUNTY_{environment}')
+
     def bundle(self):
         return dict(SCHOOL_BUS_DATASOURCE_URL='jdbc:mysql://db:3307/school_bus?useSSL=false',
                     SCHOOL_BUS_DATASOURCE_USERNAME='test', SCHOOL_BUS_DATASOURCE_PASSWORD='test',
@@ -108,6 +130,13 @@ if a[:2]==['service','inspect'] and '--format' in a:
         self.assertIn('service update', calls)
         self.assertIn('--force', calls)
         self.assertIn('up -d --pull always --force-recreate --wait', calls)
+        self.assertIn('--env-add VAULT_BASE_PATH=reaxium_ci/device_api', calls)
+
+    def test_app_update_preserves_explicit_vault_path(self):
+        result = self.run_script('deploy.sh', '--client', 'TEST', '--env', 'DEV', '--app',
+                                 VAULT_BASE_PATH='custom/device_api')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('--env-add VAULT_BASE_PATH=custom/device_api', self.log.read_text())
 
     def test_build_without_compose(self):
         result = self.run_script('build.sh', '-t', 'patch', MOCK_NO_COMPOSE='1')

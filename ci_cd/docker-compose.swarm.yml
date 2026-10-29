@@ -3,7 +3,7 @@ x-vault: &vault
   VAULT_ADDR: ${VAULT_ADDR:-https://vault.reaxium.com}
   VAULT_MOUNT: ${VAULT_MOUNT:-kv}
   VAULT_KV_VERSION: ${VAULT_KV_VERSION:-2}
-  VAULT_BASE_PATH: ${VAULT_BASE_PATH:-reaxium_ci/driver_app_api}
+  VAULT_BASE_PATH: ${VAULT_BASE_PATH:-reaxium_ci/device_api}
   CLIENT: ${CLIENT:?Set CLIENT}
   ENVIRONMENT: ${ENVIRONMENT:?Set ENVIRONMENT}
 services:

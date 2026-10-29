@@ -335,11 +335,17 @@ forwarded to Swarm. Jenkins secrets and temporary SSH keys are cleaned up afterw
 
 Runtime configuration matches Java's Vault model: create the external Swarm secret
 `VAULT_TOKEN` on each target manager. The API and broker read the KV bundle at
-`kv/reaxium_ci/driver_app_api/${CLIENT}_${ENVIRONMENT}`. Defaults are Vault address
+`kv/reaxium_ci/device_api/${CLIENT}_${ENVIRONMENT}`, shared with the existing Java
+device_api project. Defaults are Vault address
 https://vault.reaxium.com and KV version 2; VAULT_ADDR, VAULT_MOUNT, VAULT_BASE_PATH
 and VAULT_KV_VERSION can be set in the deployment shell. Missing secrets stop startup.
 DEV and PROD use separate Vault bundles on their respective target hosts, with two
 API replicas by default. No filled development/production env files are required.
+`VAULT_BASE_PATH` can override the shared project path. Application-only updates
+apply that path to the API service; use FULL_STACK once when migrating an existing
+deployment so RabbitMQ also receives the shared path. Its credentials must match
+any existing RabbitMQ data volume. The target's VAULT_TOKEN must have read access
+to the shared bundle. Other required application settings below still apply.
 
 Populate each bundle with:
 

@@ -51,6 +51,7 @@ fi
 version=${version:-$(tr -d '[:space:]' < VERSION)}
 [[ "$version" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}$ ]] || exit 1
 export CLIENT="$client" ENVIRONMENT="$environment" API_VERSION="$version"
+export VAULT_BASE_PATH="${VAULT_BASE_PATH:-reaxium_ci/device_api}"
 stage='validating monitoring configuration (Docker Compose 2.24+ required)'
 bash ci_cd/monitoring.sh check "$stack"
 stage='checking the Docker Swarm manager'
@@ -80,7 +81,8 @@ force_args=(); if $force; then force_args=(--force); fi
 if [[ "$mode" == app ]]; then
   stage="updating API service $service"
   docker service update --detach=true --with-registry-auth "${force_args[@]}" --image "$image" \
-    --env-add "CLIENT=$client" --env-add "ENVIRONMENT=$environment" "$service"
+    --env-add "CLIENT=$client" --env-add "ENVIRONMENT=$environment" \
+    --env-add "VAULT_BASE_PATH=$VAULT_BASE_PATH" "$service"
 else
   stage="pulling RabbitMQ image reaxiumapps/driver_app_api-rabbitmq:$version"
   docker pull "reaxiumapps/driver_app_api-rabbitmq:$version"

@@ -64,7 +64,7 @@ def main():
         raise ValueError('Invalid CLIENT or ENVIRONMENT')
     addr = os.getenv('VAULT_ADDR', 'https://vault.reaxium.com').rstrip('/')
     mount = os.getenv('VAULT_MOUNT', 'kv').strip('/')
-    base = os.getenv('VAULT_BASE_PATH', 'reaxium_ci/driver_app_api').strip('/')
+    base = os.getenv('VAULT_BASE_PATH', 'reaxium_ci/device_api').strip('/')
     version = os.getenv('VAULT_KV_VERSION', '2')
     if version not in ('1', '2'):
         raise ValueError('VAULT_KV_VERSION must be 1 or 2')
