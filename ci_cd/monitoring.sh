@@ -20,7 +20,15 @@ if [[ -f monitoring/slack.local.env ]]; then
 fi
 case "$action" in
   check)
-    docker stack config -c monitoring/stack.yml >/dev/null
+    # Older Docker CLIs support stack deploy but not stack config.
+    # Match the existing device_api workflow: deploy parses the YAML itself.
+    docker stack deploy --help >/dev/null
+    for file in monitoring/stack.yml monitoring/prometheus.swarm.yml monitoring/alerts.yml \
+                monitoring/grafana/datasources/prometheus.yml \
+                monitoring/grafana/dashboards/provider.yml \
+                monitoring/grafana/dashboards/device-api.json; do
+      [[ -r "$file" ]] || { echo "Missing monitoring file: $file" >&2; exit 1; }
+    done
     ;;
   start)
     sed "s/tasks.driver_app_api_stack_driver-app-api/tasks.${stack}_driver-app-api/" \

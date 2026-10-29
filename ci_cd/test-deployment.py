@@ -88,6 +88,7 @@ a=sys.argv[1:]
 with open(os.environ['MOCK_LOG'],'a') as f:f.write(' '.join(a)+'\\n')
 if os.getenv('MOCK_FAIL') and a[0]=='push':sys.exit(1)
 if os.getenv('MOCK_NO_COMPOSE') and a[0]=='compose':sys.exit(1)
+if os.getenv('MOCK_NO_STACK_CONFIG') and a[:2]==['stack','config']:sys.exit(125)
 if os.getenv('MOCK_PULL_FAIL') and a[0]=='pull':sys.exit(1)
 if os.getenv('MOCK_SECRET_MISSING') and a[:2]==['secret','inspect']:sys.exit(1)
 if os.getenv('MOCK_MONITORING_FAIL') and a[:2]==['stack','deploy'] and a[-1].endswith('_monitoring'):sys.exit(1)
@@ -162,6 +163,24 @@ if a[:2]==['service','inspect'] and '--format' in a:
         self.assertIn('starting Prometheus and Grafana', result.stderr)
         self.assertNotIn('Deployment ready:', result.stdout)
 
+    def test_older_docker_without_stack_config(self):
+        for mode in ('--all', '--app'):
+            self.log.write_text('')
+            result = self.run_script('deploy.sh', '--client', 'TEST', '--env', 'DEV', mode,
+                                     MOCK_NO_COMPOSE='1', MOCK_NO_STACK_CONFIG='1')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            calls = self.log.read_text()
+            self.assertNotIn('stack config', calls)
+            self.assertNotIn('compose ', calls)
+            self.assertIn('-c monitoring/stack.yml', calls)
+
+    def test_missing_monitoring_file_fails_before_deployment(self):
+        (self.path / 'monitoring/stack.yml').unlink()
+        result = self.run_script('deploy.sh', '--client', 'TEST', '--env', 'DEV')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Missing monitoring file: monitoring/stack.yml', result.stderr)
+        self.assertNotIn('stack deploy --with-registry-auth', self.log.read_text())
+
     def test_monitoring_custom_stack_and_stop_preserve_data(self):
         result = self.run_script('monitoring.sh', 'start', 'custom_stack')
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -200,7 +219,7 @@ if a[:2]==['service','inspect'] and '--format' in a:
             result = self.run_script('deploy.sh', '--client', 'TEST', '--env', 'DEV', **{setting: '1'})
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(message, result.stderr)
-            self.assertNotIn('stack deploy', self.log.read_text())
+            self.assertNotIn('stack deploy --with-registry-auth', self.log.read_text())
 
 
 if __name__ == '__main__':

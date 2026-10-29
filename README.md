@@ -388,6 +388,9 @@ python3 ci_cd/test-deployment.py
 DEV and PROD use Docker Swarm commands (`docker stack deploy`, `docker service`),
 matching reaxium-device-api. Neither the Jenkins build agent nor the deployment
 server needs the Compose plugin. Local development still uses Docker Compose.
+The preflight checks monitoring files and `docker stack deploy` support. It does
+not require `docker stack config`, which is absent from older Docker CLIs;
+the stack file is parsed by `docker stack deploy` when monitoring is deployed.
 Jenkins includes monitoring and the optional Slack setup script in its bundle.
 
 After API convergence, every deployment starts/updates a separate monitoring

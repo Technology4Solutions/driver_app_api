@@ -52,7 +52,7 @@ version=${version:-$(tr -d '[:space:]' < VERSION)}
 [[ "$version" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}$ ]] || exit 1
 export CLIENT="$client" ENVIRONMENT="$environment" API_VERSION="$version"
 export VAULT_BASE_PATH="${VAULT_BASE_PATH:-reaxium_ci/device_api}"
-stage='validating monitoring Swarm configuration'
+stage='checking monitoring files and Swarm deployment support'
 bash ci_cd/monitoring.sh check "$stack"
 stage='checking the Docker Swarm manager'
 if [[ $(docker info --format '{{.Swarm.LocalNodeState}}') == inactive ]]; then docker swarm init; fi
