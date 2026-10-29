@@ -1,0 +1,13 @@
+groups:
+  - name: device-api
+    rules:
+      - alert: DeviceApiDown
+        expr: up{job="device-api"} == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations: {summary: "Device API monitoring endpoint is unavailable"}
+      - alert: DeviceApiHighErrorRate
+        expr: sum(rate(http_requests_total{status=~"5.."}[5m])) / clamp_min(sum(rate(http_requests_total[5m])), 0.001) > 0.05
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: "Device API server errors exceed 5 percent"}
