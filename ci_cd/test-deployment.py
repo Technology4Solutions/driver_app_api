@@ -54,6 +54,8 @@ class ScriptTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name)
         shutil.copytree(ROOT, self.path / 'ci_cd', ignore=shutil.ignore_patterns('__pycache__'))
+        shutil.copytree(ROOT.parent / 'monitoring', self.path / 'monitoring',
+                        ignore=shutil.ignore_patterns('*.local.*', '*.generated.*'))
         (self.path / 'VERSION').write_text('1.2.3\n')
         self.log = self.path / 'calls'
         mock = self.path / 'docker'
@@ -63,6 +65,11 @@ from pathlib import Path
 a=sys.argv[1:]
 with open(os.environ['MOCK_LOG'],'a') as f:f.write(' '.join(a)+'\\n')
 if os.getenv('MOCK_FAIL') and a[0]=='push':sys.exit(1)
+if os.getenv('MOCK_NO_COMPOSE') and a[0]=='compose':sys.exit(1)
+if os.getenv('MOCK_PULL_FAIL') and a[0]=='pull':sys.exit(1)
+if os.getenv('MOCK_SECRET_MISSING') and a[:2]==['secret','inspect']:sys.exit(1)
+if os.getenv('MOCK_MONITORING_FAIL') and a[0]=='compose' and 'up' in a:sys.exit(1)
+if a[:2]==['service','ls'] and not os.getenv('MOCK_EMPTY_STACK'):print('driver_app_api_stack_driver-app-api')
 if a[0]=='info':print('active' if 'LocalNodeState' in a[-1] else 'true')
 if a[:2]==['stack','services']:
  for name in ['driver-app-api','driver-app-rabbitmq','driver-app-redis']:print('driver_app_api_stack_'+name+' 1/1')
@@ -100,10 +107,63 @@ if a[:2]==['service','inspect'] and '--format' in a:
         self.assertNotIn('stack deploy', calls)
         self.assertIn('service update', calls)
         self.assertIn('--force', calls)
+        self.assertIn('up -d --pull always --force-recreate --wait', calls)
+
+    def test_build_without_compose(self):
+        result = self.run_script('build.sh', '-t', 'patch', MOCK_NO_COMPOSE='1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.log.read_text()
+        self.assertNotIn('compose', calls)
+        self.assertIn('push reaxiumapps/driver_app_api:1.2.4', calls)
+        self.assertIn('push reaxiumapps/driver_app_api-rabbitmq:1.2.4', calls)
+        self.assertEqual((self.path / 'VERSION').read_text().strip(), '1.2.4')
+
+    def test_deploy_without_compose_fails_before_changes(self):
+        result = self.run_script('deploy.sh', '--client', 'TEST', '--env', 'DEV', MOCK_NO_COMPOSE='1')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('on the deployment server', result.stderr)
+        self.assertNotIn('stack deploy', self.log.read_text())
+        self.assertNotIn('service update', self.log.read_text())
+
+    def test_monitoring_failure_fails_deployment(self):
+        result = self.run_script('deploy.sh', '--client', 'TEST', '--env', 'PROD', MOCK_MONITORING_FAIL='1')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('starting Prometheus and Grafana', result.stderr)
+        self.assertNotIn('Deployment ready:', result.stdout)
+
+    def test_monitoring_custom_stack_and_stop_preserve_data(self):
+        result = self.run_script('monitoring.sh', 'start', 'custom_stack')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        config = (self.path / 'monitoring/prometheus.generated.yml').read_text()
+        self.assertIn('tasks.custom_stack_driver-app-api', config)
+        result = self.run_script('monitoring.sh', 'stop')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.log.read_text()
+        self.assertIn('down', calls)
+        self.assertNotIn('--volumes', calls)
 
     def test_rollback_and_invalid_environment_fail(self):
-        self.assertNotEqual(self.run_script('deploy.sh', '--client', 'TEST', '--env', 'DEV', MOCK_STATE='rollback_completed').returncode, 0)
+        result = self.run_script('deploy.sh', '--client', 'TEST', '--env', 'DEV', MOCK_STATE='rollback_completed')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('waiting for stack', result.stderr)
+        self.assertIn('stack ps --no-trunc', self.log.read_text())
         self.assertNotEqual(self.run_script('deploy.sh', '--client', 'TEST', '--env', 'invalid').returncode, 0)
+
+    def test_app_only_bootstraps_missing_stack(self):
+        result = self.run_script('deploy.sh', '--client', 'TEST', '--env', 'DEV', '--app', '--force', MOCK_EMPTY_STACK='1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('first deployment', result.stdout)
+        self.assertIn('stack deploy', self.log.read_text())
+        self.assertIn('pull reaxiumapps/driver_app_api-rabbitmq:1.2.3', self.log.read_text())
+
+    def test_preflight_errors_identify_failing_stage(self):
+        for setting, message in [('MOCK_PULL_FAIL', 'pulling API image'),
+                                 ('MOCK_SECRET_MISSING', 'VAULT_TOKEN Swarm secret')]:
+            self.log.write_text('')
+            result = self.run_script('deploy.sh', '--client', 'TEST', '--env', 'DEV', **{setting: '1'})
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(message, result.stderr)
+            self.assertNotIn('stack deploy', self.log.read_text())
 
 
 if __name__ == '__main__':

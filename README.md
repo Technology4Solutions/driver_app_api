@@ -42,6 +42,15 @@ docker compose --profile monitoring up --build -d
 
 The API listens on localhost:8080. The separate admin listener on localhost:9090 exposes `/health/live` and `/metrics`. With monitoring enabled, Prometheus is at localhost:9091 and Grafana at localhost:3000 (initial local login admin/admin). Grafana includes a provisioned dashboard.
 
+Local monitoring uses Linux host networking, matching the API, so Prometheus can
+reach the private admin listener. Keep the default admin port 9090 or update
+`monitoring/prometheus.yml` to match. Open Grafana's **Dashboards → Device API**.
+CPU and memory panels require rebuilding the API image with the process collector.
+To start only monitoring for an already running native API, use
+`docker compose --profile monitoring up -d --no-deps prometheus grafana`.
+Generate traffic with `curl http://127.0.0.1:8080/` and allow at least two 15-second
+scrapes for rates. Check http://localhost:9091/targets if panels are empty.
+
 Configuration is loaded automatically from `.env`; existing process environment variables take precedence. `.env` is excluded from Git and Docker build contexts. Use `.env.example` as a template.
 
 Database parameters: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_MAX_CONNECTIONS`, and `DB_CONNECT_TIMEOUT_SECONDS`. All are required for native execution. The API verifies the connection before opening HTTP listeners and closes the pool on graceful shutdown. `API_BIND`, `ADMIN_BIND`, and `RUST_LOG` configure listeners and logging.
@@ -368,9 +377,60 @@ bash ci_cd/deploy.sh --remove
 python3 ci_cd/test-deployment.py
 ```
 
-`--app` updates only the API; `--all` updates the complete Rust stack. `--force`
+### Deployment monitoring with Grafana
+
+`/metrics` is the raw Prometheus feed. Build and deploy a new API image to enable
+the new Linux process CPU, resident memory, threads, file descriptor and uptime
+metrics. CPU at 100% means one CPU core; memory is API process memory, not total
+server or container memory.
+
+Jenkins includes monitoring and the optional Slack setup script in its deployment
+bundle. Both DEV and PROD deployments automatically start/update Prometheus and
+Grafana after API convergence, including APPLICATION_ONLY deployments. Deployment
+validates the monitoring Compose configuration before making changes, pulls the
+pinned monitoring images and waits for their health checks. Docker Compose 2.24+
+is required on the target manager only; the Jenkins image build needs the Docker
+CLI without Compose. No Slack webhook is required.
+
+For a manual monitoring restart on the Swarm manager, run:
+
+```bash
+cd /home/ubuntu/installation/git_base_files/driver_app_api/MARTIN_COUNTY_DEV
+bash ci_cd/monitoring.sh start
+```
+
+This joins the existing attachable overlay network and discovers every API replica
+on internal port 9090. The deployment generates task DNS configuration for its stack name; for manual
+use pass it as `bash ci_cd/monitoring.sh start CUSTOM_STACK`. Prometheus retains 15 days of metrics in a volume.
+Grafana settings also persist in a volume. Neither service is publicly exposed.
+
+From your laptop, open an SSH tunnel (replace `SERVER_IP`):
+
+```bash
+ssh -N -L 3000:127.0.0.1:3000 -L 9091:127.0.0.1:9091 ubuntu@SERVER_IP
+```
+
+Open http://localhost:3000, log in initially with `admin` / `admin`, change the
+password when prompted, and open **Dashboards → Device API**. The dashboard shows
+request rate, mean/p95/p99 response time, status codes, error ratio, availability,
+CPU, resident memory, uptime, threads and file descriptors per API replica.
+Rates need at least two scrapes and HTTP graphs need traffic. If graphs are empty,
+check http://localhost:9091/targets: each API replica should be UP.
+
+Monitoring configuration is reapplied automatically on each deployment.
+`deploy.sh --status` includes monitoring status. `deploy.sh --remove` stops
+monitoring and removes the API stack while preserving all data volumes.
+CLEAN_DEPLOYMENT restarts both afterward. To stop only monitoring, use
+`bash ci_cd/monitoring.sh stop`. The setup assumes one client/environment per
+target host, as for the API; DEV and PROD retain separate data on their hosts.
+
+`--app` updates only the API in an existing stack. When the stack has no services,
+it creates the full stack for the first deployment. A partial stack missing its API
+requires `--all` (Jenkins `FULL_STACK`) to repair it. `--all` updates the complete Rust stack. `--force`
 recreates API tasks. CLEAN_DEPLOYMENT removes the stack first and preserves volumes.
 Rollbacks, paused updates and convergence timeouts fail the deployment job. The
+script reports the failing deployment stage and prints service/task status on
+convergence failures so Jenkins shows Docker errors before the SSH exception. The
 health check verifies the HTTP listener after startup, not ongoing dependency health.
 Tests in test-deployment.py are offline; Jenkins/Vault/Swarm integration requires
 configured infrastructure. Ignored database integration tests remain in GitHub CI.

@@ -1,0 +1,15 @@
+{
+  "ReaxiumParameters": {
+    "DeviceTraffic": {
+      "device_id": 935,
+      "stop_id": 4583,
+      "route_id": 5590,
+      "driver_id": 71655,
+      "trace_id": "test-route-20261021-001",
+      "latitude": 27.1975,
+      "longitude": -80.2528,
+      "bus_info": "364",
+      "traffic_date": "2026-10-21 08:00:00"
+    }
+  }
+}

@@ -1,0 +1,5 @@
+/target/
+__pycache__/
+/monitoring/slack.local.env
+/monitoring/prometheus.generated.yml
+/monitoring/grafana/alerting/*.local.json
