@@ -386,10 +386,11 @@ server or container memory.
 
 Jenkins includes monitoring and the optional Slack setup script in its deployment
 bundle. Both DEV and PROD deployments automatically start/update Prometheus and
-Grafana after API convergence, including APPLICATION_ONLY deployments. The build
-validates the monitoring Compose configuration; deployment pulls the pinned
-monitoring images and waits for their health checks. Docker Compose 2.24+ is
-required on the build agent and target manager. No Slack webhook is required.
+Grafana after API convergence, including APPLICATION_ONLY deployments. Deployment
+validates the monitoring Compose configuration before making changes, pulls the
+pinned monitoring images and waits for their health checks. Docker Compose 2.24+
+is required on the target manager only; the Jenkins image build needs the Docker
+CLI without Compose. No Slack webhook is required.
 
 For a manual monitoring restart on the Swarm manager, run:
 

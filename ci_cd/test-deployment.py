@@ -65,6 +65,7 @@ from pathlib import Path
 a=sys.argv[1:]
 with open(os.environ['MOCK_LOG'],'a') as f:f.write(' '.join(a)+'\\n')
 if os.getenv('MOCK_FAIL') and a[0]=='push':sys.exit(1)
+if os.getenv('MOCK_NO_COMPOSE') and a[0]=='compose':sys.exit(1)
 if os.getenv('MOCK_PULL_FAIL') and a[0]=='pull':sys.exit(1)
 if os.getenv('MOCK_SECRET_MISSING') and a[:2]==['secret','inspect']:sys.exit(1)
 if os.getenv('MOCK_MONITORING_FAIL') and a[0]=='compose' and 'up' in a:sys.exit(1)
@@ -107,6 +108,22 @@ if a[:2]==['service','inspect'] and '--format' in a:
         self.assertIn('service update', calls)
         self.assertIn('--force', calls)
         self.assertIn('up -d --pull always --force-recreate --wait', calls)
+
+    def test_build_without_compose(self):
+        result = self.run_script('build.sh', '-t', 'patch', MOCK_NO_COMPOSE='1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.log.read_text()
+        self.assertNotIn('compose', calls)
+        self.assertIn('push reaxiumapps/driver_app_api:1.2.4', calls)
+        self.assertIn('push reaxiumapps/driver_app_api-rabbitmq:1.2.4', calls)
+        self.assertEqual((self.path / 'VERSION').read_text().strip(), '1.2.4')
+
+    def test_deploy_without_compose_fails_before_changes(self):
+        result = self.run_script('deploy.sh', '--client', 'TEST', '--env', 'DEV', MOCK_NO_COMPOSE='1')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('on the deployment server', result.stderr)
+        self.assertNotIn('stack deploy', self.log.read_text())
+        self.assertNotIn('service update', self.log.read_text())
 
     def test_monitoring_failure_fails_deployment(self):
         result = self.run_script('deploy.sh', '--client', 'TEST', '--env', 'PROD', MOCK_MONITORING_FAIL='1')

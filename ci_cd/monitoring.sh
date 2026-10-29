@@ -7,7 +7,10 @@ stack=${2:-driver_app_api_stack}
 compose() { docker compose -f monitoring/compose.swarm.yaml "$@"; }
 case "$action" in
   check)
-    docker compose version >/dev/null
+    if ! docker compose version >/dev/null 2>&1; then
+      echo 'Monitoring requires Docker Compose 2.24+ on the deployment server. Install the Docker Compose plugin there, then retry deployment.' >&2
+      exit 1
+    fi
     compose config --quiet
     ;;
   start)
