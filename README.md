@@ -337,8 +337,11 @@ Runtime configuration matches Java's Vault model: create the external Swarm secr
 `VAULT_TOKEN` on each target manager. The API and broker read the KV bundle at
 `kv/reaxium_ci/device_api/${CLIENT}_${ENVIRONMENT}`, shared with the existing Java
 device_api project. Defaults are Vault address
-https://vault.reaxium.com and KV version 2; VAULT_ADDR, VAULT_MOUNT, VAULT_BASE_PATH
-and VAULT_KV_VERSION can be set in the deployment shell. Missing secrets stop startup.
+https://vault.reaxium.com with automatic KV-version detection using the mount tune
+endpoint, matching the Java startup flow. If metadata is inaccessible, detection
+falls back to KV v1 as Java does. Set VAULT_KV_VERSION=1 or 2 to override detection
+for a known mount. VAULT_ADDR, VAULT_MOUNT and VAULT_BASE_PATH can also be set in
+the deployment shell. Missing secrets stop startup.
 DEV and PROD use separate Vault bundles on their respective target hosts, with two
 API replicas by default. No filled development/production env files are required.
 `VAULT_BASE_PATH` can override the shared project path. Application-only updates

@@ -52,6 +52,9 @@ version=${version:-$(tr -d '[:space:]' < VERSION)}
 [[ "$version" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}$ ]] || exit 1
 export CLIENT="$client" ENVIRONMENT="$environment" API_VERSION="$version"
 export VAULT_BASE_PATH="${VAULT_BASE_PATH:-reaxium_ci/device_api}"
+export VAULT_ADDR="${VAULT_ADDR:-https://vault.reaxium.com}"
+export VAULT_MOUNT="${VAULT_MOUNT:-kv}"
+export VAULT_KV_VERSION="${VAULT_KV_VERSION:-auto}"
 stage='checking monitoring files and Swarm deployment support'
 bash ci_cd/monitoring.sh check "$stack"
 stage='checking the Docker Swarm manager'
@@ -82,7 +85,9 @@ if [[ "$mode" == app ]]; then
   stage="updating API service $service"
   docker service update --detach=true --with-registry-auth "${force_args[@]}" --image "$image" \
     --env-add "CLIENT=$client" --env-add "ENVIRONMENT=$environment" \
-    --env-add "VAULT_BASE_PATH=$VAULT_BASE_PATH" "$service"
+    --env-add "VAULT_BASE_PATH=$VAULT_BASE_PATH" \
+    --env-add "VAULT_ADDR=$VAULT_ADDR" --env-add "VAULT_MOUNT=$VAULT_MOUNT" \
+    --env-add "VAULT_KV_VERSION=$VAULT_KV_VERSION" "$service"
 else
   stage="pulling RabbitMQ image reaxiumapps/driver_app_api-rabbitmq:$version"
   docker pull "reaxiumapps/driver_app_api-rabbitmq:$version"

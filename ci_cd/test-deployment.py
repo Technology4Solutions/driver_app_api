@@ -21,7 +21,7 @@ class ConfigurationTests(unittest.TestCase):
         for mode in ('api', 'rabbitmq'):
             for environment in ('DEV', 'PROD'):
                 for override in (None, 'custom/device_api'):
-                    env = dict(CLIENT='MARTIN_COUNTY', ENVIRONMENT=environment)
+                    env = dict(CLIENT='MARTIN_COUNTY', ENVIRONMENT=environment, VAULT_KV_VERSION='2')
                     if override:
                         env['VAULT_BASE_PATH'] = override
                     response = MagicMock()
@@ -42,6 +42,24 @@ class ConfigurationTests(unittest.TestCase):
                     SCHOOL_BUS_DATASOURCE_USERNAME='test', SCHOOL_BUS_DATASOURCE_PASSWORD='test',
                     REAXIUM_API_USER='api', REAXIUM_API_PASSWORD='test',
                     RABBITMQ_USER='a@b', RABBITMQ_PASSWORD='a/b:c', BROADCAST_ENABLED=False)
+
+    def test_kv_detection_matches_java_with_wrapped_metadata_support(self):
+        for payload, expected in [({'options': {'version': '2'}}, '2'),
+                                  ({'data': {'options': {'version': '2'}}}, '2'),
+                                  ({'data': {'options': None}}, '1'), ({}, '1')]:
+            response = MagicMock()
+            response.__enter__.return_value = response
+            response.read.return_value = json.dumps(payload).encode()
+            with patch.object(module, 'urlopen', return_value=response) as request:
+                self.assertEqual(module.kv_version('https://vault.test', 'kv', 'test-token'), expected)
+                self.assertEqual(request.call_args.args[0].full_url, 'https://vault.test/v1/sys/mounts/kv/tune')
+                self.assertEqual(request.call_args.args[0].get_header('X-vault-token'), 'test-token')
+        with patch.object(module, 'urlopen', side_effect=module.HTTPError('https://vault.test', 403, 'denied', {}, None)):
+            self.assertEqual(module.kv_version('https://vault.test', 'kv', 'test-token'), '1')
+        with patch.object(module, 'urlopen') as request:
+            for version in ('1', '2'):
+                self.assertEqual(module.kv_version('https://vault.test', 'kv', 'test-token', version), version)
+            request.assert_not_called()
 
     def test_java_keys_and_url_encoding(self):
         for environment in ('DEV', 'PROD'):
@@ -135,6 +153,7 @@ if a[:2]==['service','inspect'] and '--format' in a:
         self.assertIn('--force', calls)
         self.assertIn('-c monitoring/stack.yml driver_app_api_stack_monitoring', calls)
         self.assertIn('--env-add VAULT_BASE_PATH=reaxium_ci/device_api', calls)
+        self.assertIn('--env-add VAULT_KV_VERSION=auto', calls)
 
     def test_app_update_preserves_explicit_vault_path(self):
         result = self.run_script('deploy.sh', '--client', 'TEST', '--env', 'DEV', '--app',
