@@ -9,11 +9,15 @@ from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
 
+class ConfigurationError(ValueError):
+    """A safe message containing setting names, never their values."""
+
+
 def kv_version(addr, mount, token, configured='auto'):
     if configured in ('1', '2'):
         return configured
     if configured != 'auto':
-        raise ValueError('VAULT_KV_VERSION must be auto, 1 or 2')
+        raise ConfigurationError('VAULT_KV_VERSION must be auto, 1 or 2')
     request = Request(f'{addr}/v1/sys/mounts/{mount}/tune', headers={'X-Vault-Token': token})
     try:
         with urlopen(request, timeout=30) as response:
@@ -39,7 +43,7 @@ def configuration(environ, bundle, mode):
     def require(key):
         value = bundle.get(key)
         if not value or not isinstance(value, str):
-            raise ValueError(f'Missing Vault key: {key}')
+            raise ConfigurationError(f'Missing Vault key: {key}')
         return value
     if mode == 'rabbitmq':
         result['RABBITMQ_DEFAULT_USER'] = require('RABBITMQ_USER')
@@ -49,14 +53,22 @@ def configuration(environ, bundle, mode):
     if not result.get('DB_HOST'):
         url = urlsplit(require('SCHOOL_BUS_DATASOURCE_URL').removeprefix('jdbc:'))
         if url.scheme != 'mysql' or not url.hostname or not url.path.strip('/'):
-            raise ValueError('SCHOOL_BUS_DATASOURCE_URL must identify a MySQL database')
+            raise ConfigurationError('SCHOOL_BUS_DATASOURCE_URL must identify a MySQL database')
         result.update(DB_HOST=url.hostname, DB_PORT=str(url.port or 3306), DB_NAME=url.path.lstrip('/'))
     for native, java in [('DB_USER', 'SCHOOL_BUS_DATASOURCE_USERNAME'), ('DB_PASSWORD', 'SCHOOL_BUS_DATASOURCE_PASSWORD')]:
         if not result.get(native):
             result[native] = require(java)
+    # Match local Compose defaults when the shared Java bundle omits Rust pool settings.
+    for key, default, maximum in [('DB_PORT', '3306', 65535),
+                                  ('DB_MAX_CONNECTIONS', '5', 2**32 - 1),
+                                  ('DB_CONNECT_TIMEOUT_SECONDS', '10', 2**64 - 1)]:
+        result.setdefault(key, default)
+        value = result[key]
+        if not value.isascii() or not value.isdecimal() or not 0 < int(value) <= maximum:
+            raise ConfigurationError(f'{key} must be a positive integer within its supported range')
     for key in ['DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASSWORD', 'REAXIUM_API_USER', 'REAXIUM_API_PASSWORD']:
         if not result.get(key):
-            raise ValueError(f'Missing application setting: {key}')
+            raise ConfigurationError(f'Missing application setting: {key}')
     if not result.get('RABBITMQ_URL'):
         user = quote(require('RABBITMQ_USER'), safe='')
         password = quote(require('RABBITMQ_PASSWORD'), safe='')
@@ -67,7 +79,7 @@ def configuration(environ, bundle, mode):
     if result['BROADCAST_ENABLED'] == 'true':
         for key in ['DEVICES_API_EXPORT_DEVICE_STATUS_URL', 'DEVICE_STATUS_BROADCAST_USERNAME', 'DEVICE_STATUS_BROADCAST_PASSWORD']:
             if not result.get(key):
-                raise ValueError(f'Missing enabled broadcast setting: {key}')
+                raise ConfigurationError(f'Missing enabled broadcast setting: {key}')
     return result
 
 
@@ -92,6 +104,9 @@ def main():
         payload = json.load(response)
     bundle = payload['data']['data'] if version == '2' else payload['data']
     settings = configuration(os.environ, bundle, mode)
+    if '--check' in sys.argv[2:]:
+        print(f'Vault {mode} configuration validated; no application started.', flush=True)
+        return
     command = ['/usr/local/bin/device-api'] if mode == 'api' else ['docker-entrypoint.sh', 'rabbitmq-server']
     os.execvpe(command[0], command, settings)
 
@@ -99,6 +114,9 @@ def main():
 if __name__ == '__main__':
     try:
         main()
+    except ConfigurationError as error:
+        print(f'Vault configuration error: {error}', file=sys.stderr)
+        sys.exit(1)
     except HTTPError as error:
         # Do not print the URL, response body, headers or token.
         print(f'Vault startup failed (HTTP {error.code}); check Vault path, KV version and token permissions.', file=sys.stderr)

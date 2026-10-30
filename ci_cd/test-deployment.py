@@ -17,6 +17,41 @@ spec.loader.exec_module(module)
 
 
 class ConfigurationTests(unittest.TestCase):
+    def test_database_pool_defaults_and_overrides(self):
+        result = module.configuration({'ENVIRONMENT': 'DEV'}, self.bundle(), 'api')
+        self.assertEqual(result['DB_MAX_CONNECTIONS'], '5')
+        self.assertEqual(result['DB_CONNECT_TIMEOUT_SECONDS'], '10')
+        bundle = self.bundle()
+        bundle.update(DB_HOST='db', DB_NAME='school_bus', DB_MAX_CONNECTIONS=12,
+                      DB_CONNECT_TIMEOUT_SECONDS=30)
+        result = module.configuration({'ENVIRONMENT': 'DEV'}, bundle, 'api')
+        self.assertEqual(result['DB_PORT'], '3306')
+        self.assertEqual(result['DB_MAX_CONNECTIONS'], '12')
+        self.assertEqual(result['DB_CONNECT_TIMEOUT_SECONDS'], '30')
+        for key in ('DB_MAX_CONNECTIONS', 'DB_CONNECT_TIMEOUT_SECONDS'):
+            for value in ('', '0', '-1', 'invalid', str(2**64)):
+                with self.assertRaises(module.ConfigurationError):
+                    module.configuration({'ENVIRONMENT': 'DEV'}, dict(self.bundle(), **{key: value}), 'api')
+
+    def test_check_mode_validates_without_starting_application(self):
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.read.return_value = json.dumps({'data': {'data': self.bundle()}}).encode()
+        with patch.dict(os.environ, dict(CLIENT='TEST', ENVIRONMENT='DEV', VAULT_KV_VERSION='2'), clear=True), \
+             patch.object(module.sys, 'argv', ['entrypoint', 'api', '--check']), \
+             patch.object(module.Path, 'read_text', return_value='test-token'), \
+             patch.object(module, 'urlopen', return_value=response), \
+             patch.object(module.os, 'execvpe') as execute:
+            module.main()
+            execute.assert_not_called()
+
+    def test_missing_credentials_report_only_the_setting_name(self):
+        bundle = self.bundle()
+        del bundle['REAXIUM_API_USER']
+        with self.assertRaises(module.ConfigurationError) as error:
+            module.configuration({'ENVIRONMENT': 'DEV'}, bundle, 'api')
+        self.assertEqual(str(error.exception), 'Missing application setting: REAXIUM_API_USER')
+
     def test_shared_vault_path_and_override(self):
         for mode in ('api', 'rabbitmq'):
             for environment in ('DEV', 'PROD'):

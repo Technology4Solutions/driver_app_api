@@ -352,6 +352,10 @@ to the shared bundle. Other required application settings below still apply.
 
 Populate each bundle with:
 
+The Vault entrypoint defaults missing `DB_PORT` to 3306, `DB_MAX_CONNECTIONS`
+to 5 and `DB_CONNECT_TIMEOUT_SECONDS` to 10 (a JDBC URL's port takes precedence
+when deriving the database host). Explicit pool settings are validated before startup.
+
 - DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD; alternatively Java's
   SCHOOL_BUS_DATASOURCE_URL (jdbc:mysql://host:port/database),
   SCHOOL_BUS_DATASOURCE_USERNAME and SCHOOL_BUS_DATASOURCE_PASSWORD.

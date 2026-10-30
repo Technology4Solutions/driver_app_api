@@ -18,7 +18,8 @@ node {
     stage('Repository Setup') {
         checkout scm
         checkout([$class: 'GitSCM', branches: [[name: '*/develop']], userRemoteConfigs: scm.userRemoteConfigs])
-        sh 'git archive --format=tar -o deployment.tar HEAD ci_cd monitoring VERSION run-and-install/setup-alerts.py'
+        // Ship every tracked file from the selected commit, including test helpers and configuration.
+        sh 'git archive --format=tar -o deployment.tar HEAD'
     }
     withVault(configuration: [vaultUrl: 'http://vault:8200', vaultCredentialId: 'vault-token', timeout: 60], vaultSecrets: [
         [path: "kv/jenkins/${target}_SSH_PRIVATE_KEY", engineVersion: 2, secretValues: [

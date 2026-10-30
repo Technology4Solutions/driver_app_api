@@ -7,8 +7,9 @@ python3 run-and-install/load-test/export-devices.py --limit 1000
 ```
 
 The exporter reads connection settings from `.env`; override with `--env-file PATH`.
-It writes `run-and-install/devices.local.json` with mode 600, excluded from Git and
-Docker builds. It selects one combination per active device using active bus-device
+It writes `run-and-install/devices.local.json` with mode 600. That dataset is
+currently tracked in this repository and included in deployment archives, but
+excluded from Docker builds. It selects one combination per active device using active bus-device
 relationships, driver relation type 19 (the legacy active-driver rule), active users,
 active routes, and related active stops with coordinates. Start/end stops are the
 minimum/maximum linked stop IDs, representative test stops rather than geographic
@@ -143,3 +144,26 @@ and updates device status. Like the original sample, it omits `device_activity`,
 which **clears existing device activity**. Run against a test database.
 The runner strips a trailing `/school_bus_cloud` from the base URL for this endpoint,
 since this API registers DeviceStatus at `/device/DeviceStatus/update` only.
+# Run on a deployment server
+
+Jenkins deploys the tracked project files, including these test scripts and the
+tracked `run-and-install/devices.local.json` dataset. After committing and pushing
+the updated deployment pipeline, rerun deployment; an image rebuild is not needed
+just to deliver the scripts.
+
+```bash
+cd /home/ubuntu/installation/git_base_files/driver_app_api/MARTIN_COUNTY_DEV/run-and-install
+SERVICE=deviceStatus VUS=8 JOURNEYS=100 ./load-test/start.sh
+```
+
+Use a dataset valid for the target environment with at least eight devices. You
+can pass a different dataset as the final argument to `start.sh`. The launcher
+prompts for the API address, credentials and simulated date. Use the API username
+and password configured for that environment. The server needs Docker access and
+Python 3; k6 runs in Docker. This command sends up to 800 real device-status
+requests and writes to the configured database.
+
+The archive includes every Git-tracked file, including tracked `.env`,
+`credentials.local.sh`, and datasets. These replace matching files on the server
+during deployment. Untracked/ignored local files and Git history are not included;
+server-only files are left in place.
