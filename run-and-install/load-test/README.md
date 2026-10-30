@@ -195,38 +195,16 @@ bash run-and-install/load-test/web.sh \
   --dataset run-and-install/devices.local.json
 ```
 
-On DEV, run from the deployed project directory:
-
-```bash
-cd /home/ubuntu/installation/git_base_files/driver_app_api/MARTIN_COUNTY_DEV
-bash run-and-install/load-test/web.sh --api-url http://127.0.0.1:8080
-```
-
-For direct HTTP access on DEV, start the page with:
-
-```bash
-bash run-and-install/load-test/web.sh --bind 0.0.0.0 --public-host 34.210.121.144
-```
-
-Open **http://34.210.121.144:5665**. The browser prompts for username `runner`
-and the generated password printed in the server terminal. The password changes
-on every runner restart. Keep the terminal open; Ctrl+C stops the runner and its
-active container. Allow inbound TCP port 5665 in the server security group/firewall
-from your own public IP. HTTP does not encrypt the login or API credentials.
-No SSH tunnel is needed. The API URL is resolved on the server, so keep
-`--api-url http://127.0.0.1:8080` if the API listens there.
-
-The default launcher still binds to localhost for local use. An SSH tunnel is an
-optional alternative to direct access. Do not expose the Docker socket.
-No API image rebuild is required for this page. Commit/push these files and rerun
-Jenkins deployment to include them in the existing full-project archive.
-
+On DEV, use the Jenkins deployment job described below. It starts a Docker
+container automatically; no manual Python process or SSH tunnel is needed.
 
 ### Automatic DEV deployment through Jenkins
 
 The Jenkins deployment job installs and starts the control page automatically
 for `ENVIRONMENT=DEV`, including `APPLICATION_ONLY` deployments. It runs as
-`driver-app-k6-web.service`, starts after server reboot, and restarts on failure.
+`driver-app-k6-web` in Docker, publishes port 5665, and uses `unless-stopped`
+to restart after a crash or server reboot. Jenkins builds its runtime image
+on the deployment host. The old systemd service is disabled automatically.
 Jenkins stops it before replacing project files (stopping an active test), then
 restarts it after API deployment and verifies authenticated HTTP access. PROD
 has no runner deployment stage. Local use remains `bash run-and-install/load-test/web.sh`.
@@ -235,9 +213,9 @@ One-time setup:
 
 1. In Jenkins Credentials, add **Secret text** with ID **k6-web-access-token**.
    Choose a random password of at least 20 characters without whitespace.
-2. The deployment SSH user needs Python 3, Docker access, and passwordless sudo
-   for installing/restarting systemd services. The script uses `sudo -n` and fails
-   rather than prompting Jenkins for a password.
+2. The deployment SSH user needs Docker access. On the first migration only,
+   passwordless sudo is needed to disable the existing systemd service.
+   Python is supplied by the container image.
 3. Allow inbound TCP **5665** from your IP in the DEV server security group.
 
 Commit/push the files to `develop`, then run the existing Jenkins deployment job.
@@ -275,10 +253,17 @@ the test page uses `runner` and the Jenkins secret. HTTP traffic is unencrypted.
 If a page is unreachable, run on the server:
 
 ```bash
-systemctl is-active driver-app-k6-web.service
+docker inspect --format '{{.State.Status}} {{.State.Health.Status}}' driver-app-k6-web
 curl -s -o /dev/null -w 'Test page HTTP %{http_code}\n' http://127.0.0.1:5665/
 curl -s -o /dev/null -w 'Grafana HTTP %{http_code}\n' http://127.0.0.1:3000/api/health
 ```
 
 The test page should return 401 (login required); Grafana health should return 200.
 If these succeed but your browser times out, check the public IP and firewall rules.
+
+The runner mounts the Docker socket to launch sibling k6 containers and requires
+trusted access to the host Docker daemon. The project is mounted read-only at its
+host absolute path; `.k6-web/results` is a separate writable mount for temporary
+summaries. k6 uses host networking, so its default API URL remains
+`http://127.0.0.1:8080`. The control page uses Docker bridge networking with
+`5665:5665` published. Troubleshoot with `docker logs --tail 60 driver-app-k6-web`.

@@ -39,6 +39,7 @@ node {
                 if (target == 'DEV') {
                     // Finish/stop the current runner before replacing its source files.
                     sshCommand remote: remote, command: 'if systemctl cat driver-app-k6-web.service >/dev/null 2>&1; then sudo -n systemctl stop driver-app-k6-web.service; fi'
+                    sshCommand remote: remote, command: 'if docker container inspect driver-app-k6-web >/dev/null 2>&1; then docker stop --time 400 driver-app-k6-web; fi'
                 }
                 sshPut remote: remote, from: 'deployment.tar', into: directory
                 sshCommand remote: remote, command: "cd '${directory}' && tar -xf deployment.tar && rm deployment.tar"
