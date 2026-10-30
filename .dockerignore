@@ -4,3 +4,5 @@
 target
 **/__pycache__
 **/*.local.*
+
+.k6-web/

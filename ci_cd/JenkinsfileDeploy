@@ -36,6 +36,10 @@ node {
             def directory = "/home/ubuntu/installation/git_base_files/driver_app_api/${client}_${target}"
             stage('Remote Repository Setup') {
                 sshCommand remote: remote, command: "mkdir -p '${directory}'"
+                if (target == 'DEV') {
+                    // Finish/stop the current runner before replacing its source files.
+                    sshCommand remote: remote, command: 'if systemctl cat driver-app-k6-web.service >/dev/null 2>&1; then sudo -n systemctl stop driver-app-k6-web.service; fi'
+                }
                 sshPut remote: remote, from: 'deployment.tar', into: directory
                 sshCommand remote: remote, command: "cd '${directory}' && tar -xf deployment.tar && rm deployment.tar"
             }
@@ -47,6 +51,24 @@ node {
                     sshCommand remote: remote, command: "cd '${directory}' && bash ci_cd/deploy.sh --remove"
                 }
                 sshCommand remote: remote, command: "cd '${directory}' && bash ci_cd/deploy.sh ${arguments}"
+            }
+            if (target == 'DEV') {
+                stage('Deploy k6 Web Runner') {
+                    // A dedicated browser login; never reuse the API or Vault token.
+                    withCredentials([string(credentialsId: 'k6-web-access-token', variable: 'K6_WEB_TOKEN')]) {
+                        def tokenFile = "${pwd(tmp: true)}/k6-web-access-token"
+                        try {
+                            writeFile file: tokenFile, text: env.K6_WEB_TOKEN
+                            withEnv(["K6_TOKEN_FILE=${tokenFile}"]) { sh 'chmod 600 "$K6_TOKEN_FILE"' }
+                            if (!(env.HOST_IP ==~ /[A-Za-z0-9.-]+/)) error('Invalid k6 web public host')
+                            sshCommand remote: remote, command: "mkdir -p '${directory}/.k6-web' && chmod 700 '${directory}/.k6-web'"
+                            sshPut remote: remote, from: tokenFile, into: "${directory}/.k6-web"
+                            sshCommand remote: remote, command: "cd '${directory}' && mv .k6-web/k6-web-access-token .k6-web/access-token && chmod 600 .k6-web/access-token && bash ci_cd/k6-web.sh start '${env.HOST_IP}'"
+                        } finally {
+                            withEnv(["K6_TOKEN_FILE=${tokenFile}"]) { sh 'rm -f "$K6_TOKEN_FILE"' }
+                        }
+                    }
+                }
             }
             stage('Post-Deployment Verification') {
                 sshCommand remote: remote, command: "cd '${directory}' && bash ci_cd/deploy.sh --status"

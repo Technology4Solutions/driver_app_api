@@ -167,3 +167,92 @@ The archive includes every Git-tracked file, including tracked `.env`,
 `credentials.local.sh`, and datasets. These replace matching files on the server
 during deployment. Untracked/ignored local files and Git history are not included;
 server-only files are left in place.
+
+## Web control page (local and DEV)
+
+Start the API and monitoring using your existing local scripts, then start the
+control page in a second terminal (Python 3 and Docker access required):
+
+```bash
+bash run-and-install/load-test/web.sh
+```
+
+Open **http://127.0.0.1:5665**. Select the service, concurrent devices, repetitions,
+simulated date and maximum duration. Enter the API credentials and confirm that
+the target uses a test database. Start with one device and one repetition.
+The page runs the existing `routes.js`, shows live console output, and displays
+response-time charts, request count, HTTP failure rate, application success and
+database-save rate after completion. CPU/memory remain in your existing Grafana
+dashboard (locally http://localhost:3000). Stop terminates the actual k6 container;
+it cannot undo requests already sent. Only one test runs at a time. The last result
+is held in memory and replaced on the next run; credentials are not saved by the UI.
+
+For a different API or dataset:
+
+```bash
+bash run-and-install/load-test/web.sh \
+  --api-url http://127.0.0.1:8080 \
+  --dataset run-and-install/devices.local.json
+```
+
+On DEV, run from the deployed project directory:
+
+```bash
+cd /home/ubuntu/installation/git_base_files/driver_app_api/MARTIN_COUNTY_DEV
+bash run-and-install/load-test/web.sh --api-url http://127.0.0.1:8080
+```
+
+For direct HTTP access on DEV, start the page with:
+
+```bash
+bash run-and-install/load-test/web.sh --bind 0.0.0.0 --public-host 34.210.121.144
+```
+
+Open **http://34.210.121.144:5665**. The browser prompts for username `runner`
+and the generated password printed in the server terminal. The password changes
+on every runner restart. Keep the terminal open; Ctrl+C stops the runner and its
+active container. Allow inbound TCP port 5665 in the server security group/firewall
+from your own public IP. HTTP does not encrypt the login or API credentials.
+No SSH tunnel is needed. The API URL is resolved on the server, so keep
+`--api-url http://127.0.0.1:8080` if the API listens there.
+
+The default launcher still binds to localhost for local use. An SSH tunnel is an
+optional alternative to direct access. Do not expose the Docker socket.
+No API image rebuild is required for this page. Commit/push these files and rerun
+Jenkins deployment to include them in the existing full-project archive.
+
+
+### Automatic DEV deployment through Jenkins
+
+The Jenkins deployment job installs and starts the control page automatically
+for `ENVIRONMENT=DEV`, including `APPLICATION_ONLY` deployments. It runs as
+`driver-app-k6-web.service`, starts after server reboot, and restarts on failure.
+Jenkins stops it before replacing project files (stopping an active test), then
+restarts it after API deployment and verifies authenticated HTTP access. PROD
+has no runner deployment stage. Local use remains `bash run-and-install/load-test/web.sh`.
+
+One-time setup:
+
+1. In Jenkins Credentials, add **Secret text** with ID **k6-web-access-token**.
+   Choose a random password of at least 20 characters without whitespace.
+2. The deployment SSH user needs Python 3, Docker access, and passwordless sudo
+   for installing/restarting systemd services. The script uses `sudo -n` and fails
+   rather than prompting Jenkins for a password.
+3. Allow inbound TCP **5665** from your IP in the DEV server security group.
+
+Commit/push the files to `develop`, then run the existing Jenkins deployment job.
+No application image rebuild is required for the web runner. Jenkins uses the
+host IP already obtained from Vault and reports `http://HOST_IP:5665` on success.
+Log in with username **runner** and the password stored in the Jenkins credential.
+The credential is stored in a private `.k6-web/access-token` file on the server,
+excluded from Git and Docker builds; it is not printed in service logs.
+HTTP is unencrypted, including browser login and API credentials.
+
+
+The web runner automatically reads `REAXIUM_API_USER` and `REAXIUM_API_PASSWORD`
+from the project-root `.env` file. Exported environment variables take precedence.
+When both are configured, the page hides the credential fields and uses them on
+the server; it never sends these values to the browser. If either is missing,
+the page asks for both credentials. Use `--env-file /path/to/.env` to select another
+file. Restart the runner after changing credentials (rerun deployment on DEV).
+The DEV browser login (`runner` / Jenkins credential) remains separate.

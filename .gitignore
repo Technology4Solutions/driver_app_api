@@ -3,3 +3,6 @@ __pycache__/
 /monitoring/slack.local.env
 /monitoring/prometheus.generated.yml
 /monitoring/grafana/alerting/*.local.json
+
+# Jenkins-provisioned k6 browser credential
+.k6-web/
