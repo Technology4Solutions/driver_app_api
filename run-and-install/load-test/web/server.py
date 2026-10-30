@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local or authenticated HTTP k6 control panel. Requires Python 3 and Docker on Linux."""
+"""Local or authenticated HTTP k6 control panel. Requires Python 3.5+ and Docker on Linux."""
 import argparse
 import base64
 import datetime
@@ -7,15 +7,26 @@ import json
 import os
 from pathlib import Path
 import re
-import secrets
+import hmac
+import binascii
 import shlex
 import subprocess
 import tempfile
 import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from socketserver import ThreadingMixIn
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parent
+
+
+class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+    # Equivalent to the stdlib threaded HTTP server added in Python 3.7.
+    daemon_threads = True
+
+
+def token_urlsafe(size):
+    return base64.urlsafe_b64encode(os.urandom(size)).rstrip(b'=').decode('ascii')
 
 
 def load_credentials(path):
@@ -24,7 +35,9 @@ def load_credentials(path):
     if path is not None and Path(path).exists():
         for line in Path(path).read_text().splitlines():
             key, separator, value = line.partition('=')
-            key = key.strip().removeprefix('export ')
+            key = key.strip()
+            if key.startswith('export '):
+                key = key[len('export '):]
             if separator and key in keys:
                 try:
                     values[key] = ' '.join(shlex.split(value, comments=True))
@@ -84,7 +97,7 @@ class Runner:
             if self.thread and self.thread.is_alive():
                 raise RuntimeError('A test is already running')
             self.cancel.clear()
-            run_id = secrets.token_hex(16)
+            run_id = binascii.hexlify(os.urandom(16)).decode('ascii')
             self.state = {'status': 'starting', 'id': run_id, 'logs': '', 'summary': None, 'exit_code': None}
             env = dict(os.environ, API_BASE_URL=self.api_url, SERVICE=service, VUS=str(vus),
                        JOURNEYS=str(journeys), MAX_DURATION=duration, START_DATE=date, RUN_ID=run_id,
@@ -115,20 +128,20 @@ class Runner:
                             '--mount', 'type=bind,src=%s,dst=/data/devices.json,readonly' % self.dataset,
                             '--mount', 'type=bind,src=%s,dst=/results' % output,
                             'grafana/k6:latest', 'run', '--summary-export=/results/summary.json', '/scripts/routes.js']
-                result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=300)
+                result = subprocess.run(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=300)
                 if result.returncode:
                     log(result.stderr)
                     raise RuntimeError('Docker could not create the k6 container')
                 if not self.cancel.is_set():
-                    subprocess.run(['docker', 'start', name], check=True, capture_output=True, timeout=30)
+                    subprocess.run(['docker', 'start', name], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
                     with self.lock:
                         self.state['status'] = 'running'
                     while True:
                         if self.cancel.is_set():
-                            subprocess.run(['docker', 'stop', '-t', '2', name], capture_output=True, timeout=15)
-                        result = subprocess.run(['docker', 'inspect', '--format', '{{json .State}}', name], capture_output=True, text=True, check=True, timeout=15)
+                            subprocess.run(['docker', 'stop', '-t', '2', name], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15)
+                        result = subprocess.run(['docker', 'inspect', '--format', '{{json .State}}', name], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, check=True, timeout=15)
                         state = json.loads(result.stdout)
-                        logs = subprocess.run(['docker', 'logs', '--tail', '300', name], capture_output=True, text=True, timeout=15)
+                        logs = subprocess.run(['docker', 'logs', '--tail', '300', name], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=15)
                         with self.lock:
                             self.state['logs'] = ''
                         log(logs.stdout + logs.stderr)
@@ -148,7 +161,7 @@ class Runner:
                 self.state['status'] = 'failed'
         finally:
             try:
-                subprocess.run(['docker', 'rm', '-f', name], capture_output=True, timeout=30)
+                subprocess.run(['docker', 'rm', '-f', name], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
             except (OSError, subprocess.SubprocessError):
                 log('\nContainer cleanup failed; check container ' + name + '\n')
             if self.cancel.is_set():
@@ -181,7 +194,7 @@ def make_handler(runner, token, public_host=None, access_token=None):
             if access_token is None:
                 return True
             expected = 'Basic ' + base64.b64encode(('runner:' + access_token).encode()).decode()
-            if secrets.compare_digest(self.headers.get('Authorization', ''), expected):
+            if hmac.compare_digest(self.headers.get('Authorization', ''), expected):
                 return True
             self.send_response(401)
             self.send_header('WWW-Authenticate', 'Basic realm="k6 test runner"')
@@ -234,6 +247,7 @@ def make_handler(runner, token, public_host=None, access_token=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--check-config', action='store_true', help='Validate configuration without starting a server or test')
     parser.add_argument('--bind', choices=['127.0.0.1', '0.0.0.0'], default='127.0.0.1')
     parser.add_argument('--access-token-file', type=Path, help='Persistent browser login password, provisioned by Jenkins')
     parser.add_argument('--public-host', help='Browser-facing IPv4 address or hostname, without scheme or port')
@@ -246,7 +260,7 @@ def main():
         parser.error('--public-host is required when binding to 0.0.0.0')
     if args.public_host and not re.fullmatch(r'[A-Za-z0-9.-]+', args.public_host):
         parser.error('--public-host must be an IPv4 address or hostname')
-    access_token = secrets.token_urlsafe(24) if args.bind == '0.0.0.0' else None
+    access_token = token_urlsafe(24) if args.bind == '0.0.0.0' else None
     if args.access_token_file:
         access_token = args.access_token_file.read_text().strip()
         if len(access_token) < 20 or any(c.isspace() for c in access_token):
@@ -255,7 +269,10 @@ def main():
     if url.scheme not in ('http', 'https') or not url.hostname or url.username or url.password or url.query or url.fragment:
         parser.error('--api-url must be an HTTP(S) API URL without credentials, query, or fragment')
     runner = Runner(args.dataset, args.api_url, args.env_file)
-    server = ThreadingHTTPServer((args.bind, args.port), make_handler(runner, secrets.token_urlsafe(32), args.public_host, access_token))
+    if args.check_config:
+        print('k6 web configuration validated; no server or test started', flush=True)
+        return
+    server = ThreadingHTTPServer((args.bind, args.port), make_handler(runner, token_urlsafe(32), args.public_host, access_token))
     print('k6 control page: http://%s:%d (Ctrl+C to stop)' % (args.public_host or '127.0.0.1', server.server_port), flush=True)
     if access_token:
         if args.access_token_file:

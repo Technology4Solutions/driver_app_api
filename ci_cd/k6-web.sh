@@ -11,7 +11,9 @@ case "$action" in
     [[ -s .k6-web/access-token ]] || { echo 'Missing Jenkins-provided runner access token' >&2; exit 1; }
     chmod 700 .k6-web
     chmod 600 .k6-web/access-token
-    python3 -m py_compile run-and-install/load-test/web/server.py
+    # Use the same interpreter as systemd; compilation alone misses runtime errors.
+    /usr/bin/python3 run-and-install/load-test/web/server.py --check-config \
+      --bind 0.0.0.0 --public-host "$host" --access-token-file .k6-web/access-token
     docker info >/dev/null
     docker pull grafana/k6:latest
     project_dir=$(pwd -P)
@@ -47,7 +49,7 @@ EOF
     sudo -n systemctl enable "$unit"
     sudo -n systemctl restart "$unit"
     for ((i=0;i<20;i++)); do
-      if python3 - <<'PY'
+      if /usr/bin/python3 - <<'PY'
 import base64
 from pathlib import Path
 import urllib.request
@@ -67,6 +69,9 @@ PY
       sleep 1
     done
     echo 'k6 web runner failed its authenticated HTTP health check' >&2
+    /usr/bin/python3 --version >&2
+    sudo -n systemctl status --no-pager --full "$unit" >&2 || true
+    sudo -n journalctl -u "$unit" --since '5 minutes ago' -n 60 --no-pager >&2 || true
     exit 1
     ;;
   stop) sudo -n systemctl disable --now "$unit" ;;

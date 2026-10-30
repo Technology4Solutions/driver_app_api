@@ -12,6 +12,10 @@ deployment_exit() {
     if $diagnostics; then
       docker stack services "$stack" >&2 || true
       docker stack ps --no-trunc "$stack" >&2 || true
+      for component in driver-app-api driver-app-rabbitmq; do
+        echo "Recent logs: ${stack}_${component}" >&2
+        timeout 20s docker service logs --timestamps --since 5m --tail 80 "${stack}_${component}" >&2 || true
+      done
     fi
   fi
 }
@@ -93,7 +97,7 @@ else
   docker pull "reaxiumapps/driver_app_api-rabbitmq:$version"
   stage="deploying stack $stack"
   docker stack deploy --with-registry-auth --resolve-image always -c ci_cd/docker-compose.swarm.yml "$stack"
-  if $force; then docker service update --detach=true --force "$service"; fi
+  # Defer forced recreation until the stack update has converged.
 fi
 stage="waiting for stack $stack to converge"
 diagnostics=true
@@ -110,6 +114,15 @@ for ((i=0;i<60;i++)); do
   done < <(docker stack services "$stack" --format '{{.Name}} {{.Replicas}}')
   actual=$(docker service inspect --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}' "$service")
   if $ready && ((count >= 3)) && [[ "$actual" == "$image" || "$actual" == "$image@sha256:"* ]]; then
+    if [[ "$mode" == all ]] && $force; then
+      stage="forcing API recreation after stack convergence"
+      docker service update --detach=true --force "$service"
+      force=false
+      i=-1
+      stage="waiting for stack $stack to converge after forced recreation"
+      sleep 5
+      continue
+    fi
     stage='starting Prometheus and Grafana'
     bash ci_cd/monitoring.sh start "$stack"
     echo "Deployment ready: $stack version $version"; exit 0

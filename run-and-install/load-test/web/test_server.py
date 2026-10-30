@@ -1,8 +1,11 @@
+import ast
 import base64
 import io
 import json
 from pathlib import Path
 import tempfile
+import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 from types import SimpleNamespace
@@ -110,6 +113,38 @@ class Tests(unittest.TestCase):
         self.assertNotIn('fixture', json.dumps(runner.snapshot()))
         with patch.dict('os.environ', {'REAXIUM_API_USER': 'override'}, clear=True):
             self.assertEqual(load_credentials(env_file)['REAXIUM_API_USER'], 'override')
+
+    def test_python35_compatibility_and_random_tokens(self):
+        from server import token_urlsafe
+        source = Path(__file__).with_name('server.py').read_text()
+        tree = ast.parse(source, feature_version=(3, 5))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                self.assertNotIn('secrets', [alias.name for alias in node.names])
+            if isinstance(node, ast.Call):
+                self.assertFalse({'capture_output', 'text'} & {kw.arg for kw in node.keywords})
+        tokens = {token_urlsafe(24) for _ in range(100)}
+        self.assertEqual(len(tokens), 100)
+        for token in tokens:
+            self.assertRegex(token, r'^[A-Za-z0-9_-]{32}$')
+
+    def test_config_check_without_starting_server(self):
+        token = Path(self.temp.name, 'token')
+        token.write_text('test-browser-token-long-enough')
+        env_file = Path(self.temp.name, '.env')
+        env_file.write_text('REAXIUM_API_USER=test-user\nREAXIUM_API_PASSWORD=test-password\n')
+        command = [sys.executable, str(Path(__file__).with_name('server.py')),
+                   '--check-config', '--bind', '0.0.0.0', '--public-host', 'dev.example',
+                   '--dataset', str(self.runner.dataset), '--env-file', str(env_file),
+                   '--access-token-file', str(token)]
+        result = subprocess.run(command, capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('configuration validated', result.stdout)
+        self.assertNotIn(token.read_text(), result.stdout + result.stderr)
+        token.write_text('short')
+        result = subprocess.run(command, capture_output=True, text=True, timeout=5)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('at least 20 characters', result.stderr)
 
     def test_stop_removes_container(self):
         commands = []

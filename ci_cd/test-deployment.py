@@ -252,11 +252,23 @@ if a[:2]==['service','inspect'] and '--format' in a:
         self.assertIn('Monitoring update failed', result.stderr)
         self.assertIn('stack ps --no-trunc driver_app_api_stack_monitoring', self.log.read_text())
 
+    def test_full_force_waits_for_stack_before_recreation(self):
+        result = self.run_script('deploy.sh', '--client', 'TEST', '--env', 'DEV', '--all', '--force')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.log.read_text()
+        forced = calls.index('service update --detach=true --force')
+        self.assertIn('stack services', calls[:forced])
+        self.assertIn('service inspect --format', calls[:forced])
+        self.assertIn('stack services', calls[forced:])
+        self.assertEqual(calls.splitlines().count('service update --detach=true --force driver_app_api_stack_driver-app-api'), 1)
+
     def test_rollback_and_invalid_environment_fail(self):
         result = self.run_script('deploy.sh', '--client', 'TEST', '--env', 'DEV', MOCK_STATE='rollback_completed')
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('waiting for stack', result.stderr)
         self.assertIn('stack ps --no-trunc', self.log.read_text())
+        self.assertIn('service logs --timestamps --since 5m --tail 80 driver_app_api_stack_driver-app-api', self.log.read_text())
+        self.assertIn('service logs --timestamps --since 5m --tail 80 driver_app_api_stack_driver-app-rabbitmq', self.log.read_text())
         self.assertNotEqual(self.run_script('deploy.sh', '--client', 'TEST', '--env', 'invalid').returncode, 0)
 
     def test_app_only_bootstraps_missing_stack(self):

@@ -256,3 +256,8 @@ the server; it never sends these values to the browser. If either is missing,
 the page asks for both credentials. Use `--env-file /path/to/.env` to select another
 file. Restart the runner after changing credentials (rerun deployment on DEV).
 The DEV browser login (`runner` / Jenkins credential) remains separate.
+
+
+The web runner supports the deployment host's Python 3.5+ runtime without extra
+packages. It uses OS-provided secure randomness, constant-time login comparison,
+and a threaded HTTP server compatible with older Python installations.
