@@ -147,6 +147,7 @@ if os.getenv('MOCK_SECRET_MISSING') and a[:2]==['secret','inspect']:sys.exit(1)
 if os.getenv('MOCK_MONITORING_FAIL') and a[:2]==['stack','deploy'] and a[-1].endswith('_monitoring'):sys.exit(1)
 if a[0]=='ps':print('mock-container')
 if a[0]=='inspect':print('healthy')
+if os.getenv('MOCK_DEPENDENCY_PAUSED') and a[:2]==['service','inspect'] and a[-1].endswith('driver-app-rabbitmq'):print('paused');sys.exit(0)
 if a[:2]==['service','ls'] and not any('_monitoring' in x for x in a) and not os.getenv('MOCK_EMPTY_STACK'):print('driver_app_api_stack_driver-app-api')
 if a[0]=='info':print('active' if 'LocalNodeState' in a[-1] else 'true')
 if a[:2]==['stack','services']:
@@ -259,6 +260,29 @@ if a[:2]==['service','inspect'] and '--format' in a:
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual('-c monitoring/stack.dev.yml' in self.log.read_text(), environment == 'DEV')
 
+    def test_dependencies_healthy_before_api_deployment(self):
+        result = self.run_script('deploy.sh', '--client', 'TEST', '--env', 'DEV', '--all')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.log.read_text()
+        dependencies = calls.index('-c ci_cd/docker-compose.dependencies.yml')
+        application = calls.index('-c ci_cd/docker-compose.swarm.yml')
+        self.assertLess(dependencies, application)
+        self.assertIn('inspect --format {{.State.Health.Status}}', calls[dependencies:application])
+        self.assertNotIn('--prune', calls)
+
+    def test_failed_dependency_prevents_api_update(self):
+        result = self.run_script('deploy.sh', '--client', 'TEST', '--env', 'DEV', '--all', MOCK_DEPENDENCY_PAUSED='1')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Dependency deployment failed', result.stderr)
+        self.assertNotIn('-c ci_cd/docker-compose.swarm.yml', self.log.read_text())
+
+    def test_dependency_definitions_match_full_stack(self):
+        full = (ROOT / 'docker-compose.swarm.yml').read_text()
+        dependencies = (ROOT / 'docker-compose.dependencies.yml').read_text().split('\n', 1)[1]
+        start = full.index('  driver-app-api:\n')
+        end = full.index('  driver-app-rabbitmq:\n')
+        self.assertEqual(dependencies, full[:start] + full[end:])
+
     def test_full_force_waits_for_stack_before_recreation(self):
         result = self.run_script('deploy.sh', '--client', 'TEST', '--env', 'DEV', '--all', '--force')
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -272,7 +296,7 @@ if a[:2]==['service','inspect'] and '--format' in a:
     def test_rollback_and_invalid_environment_fail(self):
         result = self.run_script('deploy.sh', '--client', 'TEST', '--env', 'DEV', MOCK_STATE='rollback_completed')
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn('waiting for stack', result.stderr)
+        self.assertIn('updating RabbitMQ and Redis', result.stderr)
         self.assertIn('stack ps --no-trunc', self.log.read_text())
         self.assertIn('service logs --timestamps --since 5m --tail 80 driver_app_api_stack_driver-app-api', self.log.read_text())
         self.assertIn('service logs --timestamps --since 5m --tail 80 driver_app_api_stack_driver-app-rabbitmq', self.log.read_text())

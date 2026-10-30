@@ -11,6 +11,30 @@ ROOT = Path(__file__).resolve().parent
 
 
 class DeploymentTests(unittest.TestCase):
+    def test_local_launcher_builds_and_publishes_loopback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            launcher = root / 'run-and-install/load-test/web.sh'
+            launcher.parent.mkdir(parents=True)
+            shutil.copy(ROOT.parent / 'run-and-install/load-test/web.sh', launcher)
+            binaries = root / 'bin'
+            binaries.mkdir()
+            docker = binaries / 'docker'
+            docker.write_text("#!/usr/bin/env python3\nimport json,os,sys\nwith open(os.environ['CALLS'],'a') as f: f.write(json.dumps(sys.argv[1:])+'\\n')\n")
+            docker.chmod(0o755)
+            log = root / 'calls'
+            result = subprocess.run(['bash', str(launcher), '--port', '5775'],
+                                    env=dict(os.environ, PATH=str(binaries) + ':' + os.environ['PATH'], CALLS=str(log)),
+                                    capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            calls = [json.loads(line) for line in log.read_text().splitlines()]
+            self.assertEqual(calls[1][:2], ['build', '-t'])
+            run = calls[2]
+            self.assertIn('127.0.0.1:5775:5775', run)
+            self.assertIn('--rm', run)
+            self.assertIn('TMPDIR=' + str(root / '.k6-web/local-results'), run)
+            self.assertNotIn('unless-stopped', run)
+
     def test_docker_runner_mounts_and_migration(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

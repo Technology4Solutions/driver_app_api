@@ -171,11 +171,16 @@ server-only files are left in place.
 ## Web control page (local and DEV)
 
 Start the API and monitoring using your existing local scripts, then start the
-control page in a second terminal (Python 3 and Docker access required):
+control page in a second terminal (Docker access required):
 
 ```bash
 bash run-and-install/load-test/web.sh
 ```
+
+The launcher builds its Docker image (cached on subsequent runs) and starts the
+page container with its port published only on localhost. Log in as `runner` using
+the generated password printed in the terminal. Ctrl+C stops and removes the container.
+No separate Docker commands are needed.
 
 Open **http://127.0.0.1:5665**. Select the service, concurrent devices, repetitions,
 simulated date and maximum duration. Enter the API credentials and confirm that

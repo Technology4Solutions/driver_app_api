@@ -95,6 +95,29 @@ if [[ "$mode" == app ]]; then
 else
   stage="pulling RabbitMQ image reaxiumapps/driver_app_api-rabbitmq:$version"
   docker pull "reaxiumapps/driver_app_api-rabbitmq:$version"
+  stage='updating RabbitMQ and Redis before the API'
+  diagnostics=true
+  docker stack deploy --with-registry-auth --resolve-image always -c ci_cd/docker-compose.dependencies.yml "$stack"
+  # No --prune: existing API tasks remain running during dependency updates.
+  dependencies_ready=false
+  for ((dependency_attempt=0;dependency_attempt<60;dependency_attempt++)); do
+    dependencies_ready=true
+    for component in driver-app-rabbitmq driver-app-redis; do
+      dependency="${stack}_${component}"
+      state=$(docker service inspect --format '{{if .UpdateStatus}}{{.UpdateStatus.State}}{{end}}' "$dependency")
+      case "$state" in rollback*|paused) echo "Dependency deployment failed: $dependency ($state)" >&2; exit 1 ;; esac
+      [[ -z "$state" || "$state" == completed ]] || dependencies_ready=false
+      container=$(docker ps -q --filter "label=com.docker.swarm.service.name=$dependency")
+      if [[ -z "$container" || "$container" == *$'\n'* ]]; then
+        dependencies_ready=false
+      elif [[ $(docker inspect --format '{{.State.Health.Status}}' "$container") != healthy ]]; then
+        dependencies_ready=false
+      fi
+    done
+    if $dependencies_ready; then break; fi
+    sleep 5
+  done
+  $dependencies_ready || { echo 'RabbitMQ/Redis did not become healthy within five minutes' >&2; exit 1; }
   stage="deploying stack $stack"
   docker stack deploy --with-registry-auth --resolve-image always -c ci_cd/docker-compose.swarm.yml "$stack"
   # Defer forced recreation until the stack update has converged.
