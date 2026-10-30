@@ -18,6 +18,11 @@ export MONITORING_ENV_FILE=/dev/null
 if [[ -f monitoring/slack.local.env ]]; then
   export MONITORING_ENV_FILE="$MONITORING_DIR/slack.local.env"
 fi
+stack_files=(-c monitoring/stack.yml)
+if [[ "${ENVIRONMENT:-}" == DEV ]]; then
+  [[ -r monitoring/stack.dev.yml ]] || { echo 'Missing monitoring file: monitoring/stack.dev.yml' >&2; exit 1; }
+  stack_files+=(-c monitoring/stack.dev.yml)
+fi
 case "$action" in
   check)
     # Older Docker CLIs support stack deploy but not stack config.
@@ -33,7 +38,7 @@ case "$action" in
   start)
     sed "s/tasks.driver_app_api_stack_driver-app-api/tasks.${stack}_driver-app-api/" \
       monitoring/prometheus.swarm.yml > monitoring/prometheus.generated.yml
-    docker stack deploy --with-registry-auth --resolve-image always -c monitoring/stack.yml "$monitoring_stack"
+    docker stack deploy --with-registry-auth --resolve-image always "${stack_files[@]}" "$monitoring_stack"
     # Bind-mounted provisioning files are re-read at process startup.
     for component in prometheus grafana; do
       docker service update --detach=true --force "${monitoring_stack}_${component}"
@@ -54,7 +59,11 @@ case "$action" in
       done
       if $ready; then
         docker stack services "$monitoring_stack"
-        echo 'Monitoring ready. Services are private; use an SSH tunnel to the Grafana container IP.'
+        if [[ "${ENVIRONMENT:-}" == DEV ]]; then
+          echo 'Monitoring ready. Grafana: http://DEV_SERVER_IP:3000 (allow TCP 3000 from your IP in the server firewall/security group).'
+        else
+          echo 'Monitoring ready. Services are private; use an SSH tunnel to the Grafana container IP.'
+        fi
         exit 0
       fi
       sleep 5

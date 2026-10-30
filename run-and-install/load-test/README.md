@@ -261,3 +261,24 @@ The DEV browser login (`runner` / Jenkins credential) remains separate.
 The web runner supports the deployment host's Python 3.5+ runtime without extra
 packages. It uses OS-provided secure randomness, constant-time login comparison,
 and a threaded HTTP server compatible with older Python installations.
+
+
+### DEV browser access
+
+Jenkins publishes Grafana at `http://DEV_SERVER_IP:3000` on DEV only; Prometheus
+remains private. The test page listens at `http://DEV_SERVER_IP:5665` after its
+Jenkins deployment stage succeeds. Allow inbound TCP ports 3000 and 5665 from your
+public IP in the EC2 security group and any host firewall. This repository does
+not change AWS security groups. Grafana uses its own existing admin credentials;
+the test page uses `runner` and the Jenkins secret. HTTP traffic is unencrypted.
+
+If a page is unreachable, run on the server:
+
+```bash
+systemctl is-active driver-app-k6-web.service
+curl -s -o /dev/null -w 'Test page HTTP %{http_code}\n' http://127.0.0.1:5665/
+curl -s -o /dev/null -w 'Grafana HTTP %{http_code}\n' http://127.0.0.1:3000/api/health
+```
+
+The test page should return 401 (login required); Grafana health should return 200.
+If these succeed but your browser times out, check the public IP and firewall rules.

@@ -186,7 +186,7 @@ if a[:2]==['service','inspect'] and '--format' in a:
         self.assertNotIn('-c ci_cd/docker-compose.swarm.yml', calls)
         self.assertIn('service update', calls)
         self.assertIn('--force', calls)
-        self.assertIn('-c monitoring/stack.yml driver_app_api_stack_monitoring', calls)
+        self.assertIn('-c monitoring/stack.yml -c monitoring/stack.dev.yml driver_app_api_stack_monitoring', calls)
         self.assertIn('--env-add VAULT_BASE_PATH=reaxium_ci/device_api', calls)
         self.assertIn('--env-add VAULT_KV_VERSION=auto', calls)
 
@@ -251,6 +251,13 @@ if a[:2]==['service','inspect'] and '--format' in a:
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('Monitoring update failed', result.stderr)
         self.assertIn('stack ps --no-trunc driver_app_api_stack_monitoring', self.log.read_text())
+
+    def test_grafana_port_override_only_in_dev(self):
+        for environment in ('DEV', 'PROD'):
+            self.log.write_text('')
+            result = self.run_script('monitoring.sh', 'start', ENVIRONMENT=environment)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual('-c monitoring/stack.dev.yml' in self.log.read_text(), environment == 'DEV')
 
     def test_full_force_waits_for_stack_before_recreation(self):
         result = self.run_script('deploy.sh', '--client', 'TEST', '--env', 'DEV', '--all', '--force')
