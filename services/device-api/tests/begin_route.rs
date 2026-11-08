@@ -1326,6 +1326,7 @@ async fn merged_route_starts_select_stops_save_each_route_and_publish() {
         .unwrap();
     assert_eq!(count, 5);
     check_merged_end(&pool).await;
+    check_merged_interrupt(&pool).await;
 }
 
 #[tokio::test]
@@ -1337,6 +1338,8 @@ async fn merged_end_requires_authentication_and_a_positive_situation() {
     for path in [
         "/DeviceTraffic/endAMergedRoute",
         "/school_bus_cloud/DeviceTraffic/endAMergedRoute",
+        "/DeviceTraffic/interruptAMergedRoute",
+        "/school_bus_cloud/DeviceTraffic/interruptAMergedRoute",
     ] {
         assert_eq!(
             post(app.clone(), path, merged_sample(), None).await["ReaxiumResponse"]["message"],
@@ -1491,4 +1494,202 @@ async fn check_merged_end(pool: &MySqlPool) {
         passengers_after, passengers_before,
         "end does not automatically drop off passengers"
     );
+}
+
+async fn check_merged_interrupt(pool: &MySqlPool) {
+    sqlx::raw_sql(include_str!("fixtures/interrupt_route.sql"))
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO traffic_type VALUES (14,'ROUTE INTERRUPTED')")
+        .execute(pool)
+        .await
+        .unwrap();
+    // Another device/route sharing the trace is deliberately included by PHP's SQL.
+    sqlx::query("INSERT INTO traffic (traffic_type_id,user_id,access_id,datetime,device_id,trace_id,id_route,bus_info,session_uid,assigned_bus) VALUES (1,13,103,'2020-01-01 08:00:00',43,'interrupt-test',8,'1','session-13','BUS-13')").execute(pool).await.unwrap();
+    // Prove that passenger insertion happens after BOTH interruption events exist.
+    sqlx::raw_sql("CREATE TRIGGER require_merged_events BEFORE INSERT ON traffic FOR EACH ROW BEGIN IF NEW.access_situation_id=20 AND (SELECT COUNT(*) FROM device_traffic WHERE trace_id=NEW.trace_id AND traffic_type_id=14)<2 THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='passenger phase ran too early'; END IF; END").execute(pool).await.unwrap();
+    for path in [
+        "/DeviceTraffic/interruptAMergedRoute",
+        "/school_bus_cloud/DeviceTraffic/interruptAMergedRoute",
+    ] {
+        let mut receiver = zeromq::PullSocket::new();
+        let endpoint = receiver
+            .bind("tcp://127.0.0.1:0")
+            .await
+            .unwrap()
+            .to_string();
+        let udp = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let app = make_app(pool.clone(), &endpoint, Some(udp.local_addr().unwrap()));
+        let mut input = merged_sample();
+        let r = &mut input["ReaxiumParameters"]["DeviceTraffic"];
+        r["trace_id"] = json!("interrupt-test");
+        r["traffic_date"] = json!("2026-11-08 09::15::00");
+        r["traffic_situation_id"] = json!("2");
+        r["traffic_type_id"] = json!(3);
+        let before = chrono::Utc::now()
+            .with_timezone(&chrono_tz::America::New_York)
+            .naive_local()
+            - chrono::Duration::seconds(1);
+        let result = post(app, path, input, Some("test-password")).await;
+        assert_eq!(result["ReaxiumResponse"]["code"], 0, "{result}");
+        let rows = sqlx::query("SELECT id_route,id_stop,traffic_type_id,traffic_situation_id,CAST(traffic_date AS CHAR) AS event_date,assigned_bus FROM device_traffic ORDER BY device_traffic_id DESC LIMIT 2").fetch_all(pool).await.unwrap();
+        for (row, route, stop, bus) in [
+            (&rows[0], 8, 11, "REQUEST-BUS"),
+            (&rows[1], 7, 10, "ROUTE-BUS"),
+        ] {
+            assert_eq!(row.get::<i64, _>("id_route"), route);
+            assert_eq!(row.get::<i64, _>("id_stop"), stop);
+            assert_eq!(row.get::<i32, _>("traffic_type_id"), 14);
+            assert_eq!(row.get::<i32, _>("traffic_situation_id"), 2);
+            assert_eq!(row.get::<String, _>("event_date"), "2026-11-08 09:15:00");
+            assert_eq!(row.get::<String, _>("assigned_bus"), bus);
+        }
+        let activity: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM device_activity WHERE device_id=42")
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        assert_eq!(activity, 0);
+        let other: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM device_activity WHERE device_id=43")
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        assert_eq!(other, 1);
+        let drops = sqlx::query("SELECT *,CAST(datetime AS CHAR) AS drop_date FROM traffic WHERE access_situation_id=20 ORDER BY user_id").fetch_all(pool).await.unwrap();
+        assert_eq!(
+            drops.len(),
+            2,
+            "no drop-offs for already dropped passengers, other traces, or repeated requests"
+        );
+        for (drop, user, device, route, session, bus) in [
+            (&drops[0], 10, 42, 7, "session-10", "ORIGINAL-BUS"),
+            (&drops[1], 13, 43, 8, "session-13", "BUS-13"),
+        ] {
+            assert_eq!(drop.get::<i64, _>("user_id"), user);
+            assert_eq!(drop.get::<i64, _>("device_id"), device);
+            assert_eq!(drop.get::<i64, _>("id_route"), route);
+            assert_eq!(
+                drop.get::<i64, _>("id_stop"),
+                10,
+                "both passengers use FIRST route's stop"
+            );
+            assert_eq!(drop.get::<i64, _>("id_stop_by_distance"), 10);
+            assert_eq!(drop.get::<i32, _>("traffic_type_id"), 2);
+            assert_eq!(drop.get::<String, _>("session_uid"), session);
+            assert_eq!(drop.get::<String, _>("assigned_bus"), bus);
+            assert_eq!(drop.get::<String, _>("stop_name"), "Containing stop");
+            assert_eq!(drop.get::<f64, _>("latitude"), 0.0);
+            assert_eq!(
+                drop.get::<String, _>("traffic_info"),
+                "Automatic drop off due to route interruption"
+            );
+        }
+        if path == "/DeviceTraffic/interruptAMergedRoute" {
+            let date = chrono::NaiveDateTime::parse_from_str(
+                &drops[0].get::<String, _>("drop_date"),
+                "%Y-%m-%d %H:%M:%S",
+            )
+            .unwrap();
+            assert!(date >= before, "passenger dates use server time");
+        }
+        for _ in 0..4 {
+            let message = tokio::time::timeout(Duration::from_secs(2), receiver.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            let value: Value = serde_json::from_str(&String::try_from(message).unwrap()).unwrap();
+            assert_eq!(value["content"]["typeTrafficId"], 14);
+            assert_eq!(value["content"]["traffic_label"], "ROUTE_MAJOR_TRAFFIC");
+        }
+        for route in [7_u32, 8] {
+            let mut bytes = [0u8; 1024];
+            let n = tokio::time::timeout(Duration::from_secs(2), udp.recv(&mut bytes))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(&bytes[n - 9..n - 5], &route.to_be_bytes());
+            assert_eq!(&bytes[n - 11..n - 9], &402_u16.to_be_bytes());
+        }
+    }
+    sqlx::raw_sql("DROP TRIGGER require_merged_events")
+        .execute(pool)
+        .await
+        .unwrap();
+    // Passenger failures must be reported without claiming committed route events vanished.
+    sqlx::query("INSERT INTO traffic (traffic_type_id,user_id,datetime,device_id,trace_id,id_route,bus_info) VALUES (1,20,'2020-01-01 08:00:00',42,'passenger-failure',7,'2')").execute(pool).await.unwrap();
+    sqlx::raw_sql("CREATE TRIGGER reject_merged_drop BEFORE INSERT ON traffic FOR EACH ROW BEGIN IF NEW.access_situation_id=20 THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='test passenger failure'; END IF; END").execute(pool).await.unwrap();
+    let mut receiver = zeromq::PullSocket::new();
+    let endpoint = receiver
+        .bind("tcp://127.0.0.1:0")
+        .await
+        .unwrap()
+        .to_string();
+    let app = make_app(pool.clone(), &endpoint, None);
+    let mut input = merged_sample();
+    input["ReaxiumParameters"]["DeviceTraffic"]["trace_id"] = json!("passenger-failure");
+    let result = post(
+        app.clone(),
+        "/DeviceTraffic/interruptAMergedRoute",
+        input.clone(),
+        Some("test-password"),
+    )
+    .await;
+    assert_eq!(result["ReaxiumResponse"]["code"], 3);
+    assert_eq!(
+        result["ReaxiumResponse"]["object"]["routes"][0]["passenger_dropoffs"]["code"],
+        3
+    );
+    let events:i64=sqlx::query_scalar("SELECT COUNT(*) FROM device_traffic WHERE trace_id='passenger-failure' AND traffic_type_id=14").fetch_one(pool).await.unwrap();
+    assert_eq!(events, 2);
+    let drops: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM traffic WHERE trace_id='passenger-failure' AND traffic_type_id=2",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(drops, 0);
+    sqlx::raw_sql("DROP TRIGGER reject_merged_drop")
+        .execute(pool)
+        .await
+        .unwrap();
+    // A failed route resolution prevents the entire passenger phase.
+    input["ReaxiumParameters"]["DeviceTraffic"]["route_ids"] = json!("7,999");
+    let result = post(
+        app.clone(),
+        "/DeviceTraffic/interruptAMergedRoute",
+        input.clone(),
+        Some("test-password"),
+    )
+    .await;
+    assert_eq!(result["ReaxiumResponse"]["code"], 3);
+    let drops: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM traffic WHERE trace_id='passenger-failure' AND traffic_type_id=2",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(drops, 0);
+    // Vision delivery failure still permits the passenger phase after all route saves.
+    input["ReaxiumParameters"]["DeviceTraffic"]["route_ids"] = json!("7,8");
+    let result = post(
+        app,
+        "/DeviceTraffic/interruptAMergedRoute",
+        input,
+        Some("test-password"),
+    )
+    .await;
+    assert_eq!(result["ReaxiumResponse"]["code"], 3);
+    assert_eq!(
+        result["ReaxiumResponse"]["object"]["routes"][0]["passenger_dropoffs"]["code"],
+        0
+    );
+    let drops: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM traffic WHERE trace_id='passenger-failure' AND traffic_type_id=2",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(drops, 1);
 }

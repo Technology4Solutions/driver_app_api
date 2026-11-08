@@ -50,6 +50,7 @@ pub(super) async fn store(
             | Action::ManualSkippedStop
             | Action::BeginMerged
             | Action::EndMerged
+            | Action::InterruptMerged
     ) {
         // Alarm/sendNotification follows PHP's latest route assignment lookup.
         sqlx::query_scalar("SELECT CAST(b.bus_number AS CHAR) FROM bus_routes_relationship rel LEFT JOIN bus b ON b.bus_id=rel.bus_id WHERE rel.id_route=? ORDER BY rel.last_update DESC LIMIT 1")
@@ -59,7 +60,11 @@ pub(super) async fn store(
     };
     if !matches!(
         action,
-        Action::SkippedStop | Action::ManualSkippedStop | Action::BeginMerged | Action::EndMerged
+        Action::SkippedStop
+            | Action::ManualSkippedStop
+            | Action::BeginMerged
+            | Action::EndMerged
+            | Action::InterruptMerged
     ) && assigned_bus
         .as_ref()
         .is_none_or(|number| number.trim().is_empty())
@@ -80,7 +85,8 @@ pub(super) async fn store(
                 Action::SkippedStop
                 | Action::ManualSkippedStop
                 | Action::BeginMerged
-                | Action::EndMerged => "latest_route_assignment",
+                | Action::EndMerged
+                | Action::InterruptMerged => "latest_route_assignment",
                 Action::Notification(_) => "latest_route_assignment_or_request_bus",
                 _ => "request_bus",
             },
@@ -160,50 +166,7 @@ pub(super) async fn store(
             })?;
     }
     if action == Action::Interrupt {
-        // Match dropPassengersByTraceID.sql: a boarding remains aboard when no
-        // later drop-off exists for that passenger and trace. Keep legacy metadata
-        // and server-time semantics; bind all request values as SQL parameters.
-        // Deployments differ in their denormalized passenger metadata columns.
-        // Include each snapshot only when traffic actually stores it; required
-        // traffic fields still fail normally if the schema is incompatible.
-        let columns: Vec<String> = sqlx::query_scalar(
-            "SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='traffic'",
-        ).fetch_all(&mut *tx).await?;
-        let mut optional_columns = String::new();
-        let mut optional_values = String::new();
-        for (column, expression) in [
-            ("stop_number", "s.stop_number"),
-            ("stop_name", "s.stop_name"),
-            ("session_uid", "t.session_uid"),
-            ("assigned_bus", "t.assigned_bus"),
-        ] {
-            if columns.iter().any(|name| name.eq_ignore_ascii_case(column)) {
-                optional_columns.push_str(&format!(", {column}"));
-                optional_values.push_str(&format!(", {expression}"));
-            }
-        }
-        // Only the fixed identifiers above enter SQL text, never request data.
-        let dropoff_sql = include_str!("drop_passengers.sql")
-            .replace("/* optional_columns */", &optional_columns)
-            .replace("/* optional_values */", &optional_values);
-        let result = sqlx::query(&dropoff_sql)
-            .bind(request.stop_id)
-            .bind(request.latitude)
-            .bind(request.longitude)
-            .bind(request.stop_id)
-            .bind(request.stop_id)
-            .bind(&request.trace_id)
-            .execute(&mut *tx)
-            .await.map_err(|error| {
-                tracing::error!(table="traffic", operation="insert", %error, "passenger drop-off failed; transaction will be rolled back"); error
-            })?;
-        tracing::info!(
-            table = "traffic",
-            operation = "insert",
-            rows_affected = result.rows_affected(),
-            pending_commit = true,
-            "automatic passenger drop-offs saved"
-        );
+        drop_passengers(&mut tx, request).await?;
     }
     tx.commit().await?;
     let saved = Saved {
@@ -221,4 +184,73 @@ pub(super) async fn store(
         "route traffic transaction committed"
     );
     Ok(saved)
+}
+
+/// Share passenger SQL with the single-route endpoint while preserving its transaction.
+async fn drop_passengers(
+    connection: &mut sqlx::MySqlConnection,
+    request: &BeginRoute,
+) -> Result<u64, sqlx::Error> {
+    // Match dropPassengersByTraceID.sql: a boarding remains aboard when no
+    // later drop-off exists for that passenger and trace. Keep legacy metadata
+    // and server-time semantics; bind all request values as SQL parameters.
+    // Deployments differ in their denormalized passenger metadata columns.
+    // Include each snapshot only when traffic actually stores it; required
+    // traffic fields still fail normally if the schema is incompatible.
+    let columns: Vec<String> = sqlx::query_scalar(
+        "SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='traffic'",
+    ).fetch_all(&mut *connection).await?;
+    let mut optional_columns = String::new();
+    let mut optional_values = String::new();
+    for (column, expression) in [
+        ("stop_number", "s.stop_number"),
+        ("stop_name", "s.stop_name"),
+        ("session_uid", "t.session_uid"),
+        ("assigned_bus", "t.assigned_bus"),
+    ] {
+        if columns.iter().any(|name| name.eq_ignore_ascii_case(column)) {
+            optional_columns.push_str(&format!(", {column}"));
+            optional_values.push_str(&format!(", {expression}"));
+        }
+    }
+    // Only the fixed identifiers above enter SQL text, never request data.
+    let dropoff_sql = include_str!("drop_passengers.sql")
+        .replace("/* optional_columns */", &optional_columns)
+        .replace("/* optional_values */", &optional_values);
+    let result = sqlx::query(&dropoff_sql)
+        .bind(request.stop_id)
+        .bind(request.latitude)
+        .bind(request.longitude)
+        .bind(request.stop_id)
+        .bind(request.stop_id)
+        .bind(&request.trace_id)
+        .execute(&mut *connection)
+        .await.map_err(|error| {
+            tracing::error!(table="traffic", operation="insert", %error, "passenger drop-off failed; transaction will be rolled back"); error
+        })?;
+    tracing::info!(
+        table = "traffic",
+        operation = "insert",
+        rows_affected = result.rows_affected(),
+        pending_commit = true,
+        "automatic passenger drop-offs saved"
+    );
+    Ok(result.rows_affected())
+}
+
+/// The merged endpoint performs passenger drop-offs only after all route events.
+pub(super) async fn drop_merged_passengers(
+    pool: &MySqlPool,
+    request: &BeginRoute,
+) -> Result<u64, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let _: i64 = sqlx::query_scalar(
+        "SELECT CAST(device_id AS SIGNED) FROM reaxium_device WHERE device_id=? FOR UPDATE",
+    )
+    .bind(request.device_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    let count = drop_passengers(&mut tx, request).await?;
+    tx.commit().await?;
+    Ok(count)
 }

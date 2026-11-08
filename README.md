@@ -678,3 +678,42 @@ curl -i -u "$REAXIUM_API_USER:$REAXIUM_API_PASSWORD" \
   --data-binary @run-and-install/json/end-merged-route.example.json \
   "$BASE_URL/DeviceTraffic/endAMergedRoute"
 ```
+
+## Interrupt merged routes
+
+`POST /DeviceTraffic/interruptAMergedRoute` and
+`/school_bus_cloud/DeviceTraffic/interruptAMergedRoute` use Basic authentication and
+the same `ReaxiumParameters.DeviceTraffic` fields as merged end. Supply the active
+run's `trace_id`, comma-separated `route_ids`, event date, coordinates, bus ID and
+required positive `traffic_situation_id`. Type is forced to **14**; situation and
+event date are preserved.
+
+Phase one processes every requested route: select a stop, insert `device_traffic`,
+clear **all activity for the device**, attempt Vision event **402**, and publish
+`ROUTE_MAJOR_TRAFFIC`. Route-assigned bus lookup matches PHP without a `bus_info`
+fallback. No separate alert is created. Each route commits independently.
+
+Only after all device events are saved, phase two reselects the stop for each route
+and inserts automatic passenger drop-offs. It matches boarding records by **trace
+ID only**, across devices and routes, when no later drop-off exists for the same
+passenger and trace. The first route can therefore drop off all remaining passengers
+at its selected stop. Original passenger/device/route/bus/audit metadata is retained;
+stop identity and event coordinates come from the interruption. Drop-offs use type
+**2**, situation **20**, message `Automatic drop off due to route interruption`, and
+**current server time in America/New_York**, rather than the supplied traffic date.
+MySQL timezone tables must contain America/New_York.
+
+A failed route write or stop lookup prevents the passenger phase. A delivery failure
+still allows all routes and passenger drop-offs to be processed. Passenger failure
+leaves already committed device events and any earlier drop-offs intact. Code 3
+includes per-route results and `passenger_dropoffs` results when attempted; inspect
+the database before retrying. Full success is code 0 with an empty object array.
+Shared Rust authentication, validation, transaction and delivery reporting conventions
+are retained; there is no transaction covering the complete request.
+
+```bash
+curl -i -u "$REAXIUM_API_USER:$REAXIUM_API_PASSWORD" \
+  -H 'Content-Type: application/json' \
+  --data-binary @run-and-install/json/interrupt-merged-route.example.json \
+  "$BASE_URL/DeviceTraffic/interruptAMergedRoute"
+```

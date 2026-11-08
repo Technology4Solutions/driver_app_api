@@ -112,6 +112,17 @@ pub async fn end_merged_route(
     handle(pool, config, vision, headers, body, Action::EndMerged).await
 }
 
+#[tracing::instrument(skip_all)]
+pub async fn interrupt_merged_route(
+    Extension(pool): Extension<MySqlPool>,
+    Extension(config): Extension<Arc<Config>>,
+    Extension(vision): Extension<Arc<VisionConfig>>,
+    headers: HeaderMap,
+    body: Result<Json<Value>, JsonRejection>,
+) -> Json<Value> {
+    handle(pool, config, vision, headers, body, Action::InterruptMerged).await
+}
+
 async fn handle(
     pool: MySqlPool,
     config: Arc<Config>,
@@ -141,7 +152,8 @@ async fn handle(
     };
     let mut results = Vec::new();
     let mut failed = false;
-    for route_id in ids {
+    let mut all_events_saved = true;
+    for &route_id in &ids {
         let mut request = template.clone();
         request.route_id = route_id;
         request.stop_id = match select_stop(&pool, route_id, request.latitude, request.longitude)
@@ -152,6 +164,7 @@ async fn handle(
                 tracing::error!(route_id, %error, "merged route stop selection failed");
                 results.push(json!({"route_id":route_id,"code":3,"message":"Could not resolve a stop for this route; processing stopped."}));
                 failed = true;
+                all_events_saved = false;
                 break;
             }
         };
@@ -170,7 +183,34 @@ async fn handle(
             failed = true;
             // Continue after delivery failures, but stop after a database failure.
             if !saved {
+                all_events_saved = false;
                 break;
+            }
+        }
+    }
+    // Match PHP's second loop: no passenger changes until all device events save.
+    // SQL is trace-wide, intentionally not filtered by route or device.
+    if action == Action::InterruptMerged && all_events_saved {
+        for (index, &route_id) in ids.iter().enumerate() {
+            let mut request = template.clone();
+            request.route_id = route_id;
+            let drop_result = async {
+                request.stop_id =
+                    select_stop(&pool, route_id, request.latitude, request.longitude).await?;
+                let rows = super::repository::drop_merged_passengers(&pool, &request).await?;
+                Ok::<u64, super::Error>(rows)
+            }
+            .await;
+            match drop_result {
+                Ok(rows) => {
+                    results[index]["passenger_dropoffs"] = json!({"code":0,"rows_inserted":rows});
+                }
+                Err(error) => {
+                    tracing::error!(route_id, %error, "merged passenger drop-off phase failed; route events already saved");
+                    results[index]["passenger_dropoffs"] = json!({"code":3,"message":"Passenger drop-off failed; route events remain saved. Check database before retrying."});
+                    failed = true;
+                    break;
+                }
             }
         }
     }
@@ -207,6 +247,21 @@ mod tests {
         assert_eq!(closest(&[near, Stop { id: 3, ..near }], 0.0, 0.0), Some(1));
         assert_eq!(closest(&[], 0.0, 0.0), None);
     }
+    #[test]
+    fn merged_interrupt_preserves_situation_and_requires_it() {
+        let mut input = json!({"route_ids":"7,8","device_id":42,"driver_id":1,"trace_id":"interrupt-test","latitude":0,"longitude":0,"bus_info":"2","traffic_date":"2026-11-08 09::15::00","traffic_type_id":3,"traffic_situation_id":"2"});
+        let (request, ids) = parse(input.clone(), Action::InterruptMerged).unwrap();
+        assert_eq!(ids, [7, 8]);
+        assert_eq!(request.traffic_type_id, Some(14));
+        assert_eq!(request.traffic_situation_id, Some(2));
+        assert_eq!(request.date().unwrap().to_string(), "2026-11-08 09:15:00");
+        input
+            .as_object_mut()
+            .unwrap()
+            .remove("traffic_situation_id");
+        assert!(parse(input, Action::InterruptMerged).is_none());
+    }
+
     #[test]
     fn merged_end_preserves_situation_and_requires_it() {
         let mut input = json!({"route_ids":"7,8","device_id":42,"driver_id":1,"trace_id":"end-test","latitude":0,"longitude":0,"bus_info":"2","traffic_date":"2026-11-08 09::30::00","traffic_type_id":3,"traffic_situation_id":"2"});

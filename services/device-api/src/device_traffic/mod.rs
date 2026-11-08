@@ -1,7 +1,7 @@
 mod broadcast;
 mod merged;
 mod model;
-pub use merged::{begin_merged_route, end_merged_route};
+pub use merged::{begin_merged_route, end_merged_route, interrupt_merged_route};
 mod repository;
 mod vision;
 
@@ -23,6 +23,7 @@ pub(super) enum Action {
     Begin,
     BeginMerged,
     EndMerged,
+    InterruptMerged,
     End,
     Interrupt,
     Send(i64),
@@ -39,7 +40,7 @@ impl Action {
             Self::SkippedStop => 18,
             Self::ManualSkippedStop => 27,
             Self::End | Self::EndMerged => 4,
-            Self::Interrupt => 14,
+            Self::Interrupt | Self::InterruptMerged => 14,
             Self::Send(id) | Self::Notification(id) => id,
         }
     }
