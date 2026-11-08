@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 use sqlx::{MySqlPool, Row};
 use std::sync::Arc;
 
-fn parse(mut value: Value) -> Option<(BeginRoute, Vec<i64>)> {
+fn parse(mut value: Value, action: Action) -> Option<(BeginRoute, Vec<i64>)> {
     let ids: Vec<i64> = value
         .get("route_ids")?
         .as_str()?
@@ -19,15 +19,19 @@ fn parse(mut value: Value) -> Option<(BeginRoute, Vec<i64>)> {
     let object = value.as_object_mut()?;
     object.insert("route_id".into(), ids[0].into());
     object.insert("stop_id".into(), 1.into()); // Resolved independently for each route below.
-    object.insert("traffic_type_id".into(), 3.into());
-    object.insert("traffic_situation_id".into(), 1.into());
+    object.insert("traffic_type_id".into(), action.traffic_type().into());
+    if action == Action::BeginMerged {
+        object.insert("traffic_situation_id".into(), 1.into());
+    }
     for field in ["trace_id", "bus_info"] {
         if let Some(Value::Number(number)) = object.get(field) {
             object.insert(field.into(), number.to_string().into());
         }
     }
     let request: BeginRoute = serde_json::from_value(value).ok()?;
-    request.valid().then_some((request, ids))
+    (request.valid()
+        && (action == Action::BeginMerged || request.traffic_situation_id.is_some_and(|id| id > 0)))
+    .then_some((request, ids))
 }
 
 #[derive(Clone, Copy)]
@@ -94,6 +98,28 @@ pub async fn begin_merged_route(
     headers: HeaderMap,
     body: Result<Json<Value>, JsonRejection>,
 ) -> Json<Value> {
+    handle(pool, config, vision, headers, body, Action::BeginMerged).await
+}
+
+#[tracing::instrument(skip_all)]
+pub async fn end_merged_route(
+    Extension(pool): Extension<MySqlPool>,
+    Extension(config): Extension<Arc<Config>>,
+    Extension(vision): Extension<Arc<VisionConfig>>,
+    headers: HeaderMap,
+    body: Result<Json<Value>, JsonRejection>,
+) -> Json<Value> {
+    handle(pool, config, vision, headers, body, Action::EndMerged).await
+}
+
+async fn handle(
+    pool: MySqlPool,
+    config: Arc<Config>,
+    vision: Arc<VisionConfig>,
+    headers: HeaderMap,
+    body: Result<Json<Value>, JsonRejection>,
+    action: Action,
+) -> Json<Value> {
     if !config.authorized(&headers) {
         return response(3, "Invalid Authentication");
     }
@@ -103,7 +129,11 @@ pub async fn begin_merged_route(
     let Some(parameters) = body.get("ReaxiumParameters") else {
         return response(3, "Invalid Json Header");
     };
-    let Some((template, ids)) = parameters.get("DeviceTraffic").cloned().and_then(parse) else {
+    let Some((template, ids)) = parameters
+        .get("DeviceTraffic")
+        .cloned()
+        .and_then(|value| parse(value, action))
+    else {
         return response(
             3,
             "Invalid Parameters received, please checkout the api documentation",
@@ -130,7 +160,7 @@ pub async fn begin_merged_route(
             config.clone(),
             vision.clone(),
             request.clone(),
-            Action::BeginMerged,
+            action,
         )
         .await;
         let success = result.0["ReaxiumResponse"]["code"] == 0;
@@ -178,9 +208,24 @@ mod tests {
         assert_eq!(closest(&[], 0.0, 0.0), None);
     }
     #[test]
+    fn merged_end_preserves_situation_and_requires_it() {
+        let mut input = json!({"route_ids":"7,8","device_id":42,"driver_id":1,"trace_id":"end-test","latitude":0,"longitude":0,"bus_info":"2","traffic_date":"2026-11-08 09::30::00","traffic_type_id":3,"traffic_situation_id":"2"});
+        let (request, ids) = parse(input.clone(), Action::EndMerged).unwrap();
+        assert_eq!(ids, [7, 8]);
+        assert_eq!(request.traffic_type_id, Some(4));
+        assert_eq!(request.traffic_situation_id, Some(2));
+        assert_eq!(request.date().unwrap().to_string(), "2026-11-08 09:30:00");
+        input
+            .as_object_mut()
+            .unwrap()
+            .remove("traffic_situation_id");
+        assert!(parse(input, Action::EndMerged).is_none());
+    }
+
+    #[test]
     fn merged_input_validates_ids_and_preserves_date() {
         let mut input = json!({"route_ids":"7, 8,7","device_id":42,"driver_id":1,"trace_id":501,"latitude":0,"longitude":0,"bus_info":2,"traffic_date":"2026-11-08 08::30::00","traffic_type_id":14,"traffic_situation_id":2});
-        let (request, ids) = parse(input.clone()).unwrap();
+        let (request, ids) = parse(input.clone(), Action::BeginMerged).unwrap();
         assert_eq!(ids, [7, 8, 7]);
         assert_eq!(request.traffic_type_id, Some(3));
         assert_eq!(request.traffic_situation_id, Some(1));
@@ -194,7 +239,7 @@ mod tests {
             json!("4294967296"),
         ] {
             input["route_ids"] = bad;
-            assert!(parse(input.clone()).is_none());
+            assert!(parse(input.clone(), Action::BeginMerged).is_none());
         }
     }
 }

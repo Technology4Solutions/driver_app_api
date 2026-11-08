@@ -10,6 +10,14 @@ use tower_http::trace::TraceLayer;
 pub fn router(metrics: Metrics) -> Router {
     Router::new()
         .route(
+            "/DeviceTraffic/endAMergedRoute",
+            axum::routing::post(device_traffic::end_merged_route),
+        )
+        .route(
+            "/school_bus_cloud/DeviceTraffic/endAMergedRoute",
+            axum::routing::post(device_traffic::end_merged_route),
+        )
+        .route(
             "/DeviceTraffic/beginAMergeRoute",
             axum::routing::post(device_traffic::begin_merged_route),
         )

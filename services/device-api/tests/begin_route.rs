@@ -1325,4 +1325,170 @@ async fn merged_route_starts_select_stops_save_each_route_and_publish() {
         .await
         .unwrap();
     assert_eq!(count, 5);
+    check_merged_end(&pool).await;
+}
+
+#[tokio::test]
+async fn merged_end_requires_authentication_and_a_positive_situation() {
+    let pool = MySqlPoolOptions::new()
+        .connect_lazy("mysql://unused:unused@127.0.0.1:1/unused")
+        .unwrap();
+    let app = make_app(pool, "tcp://127.0.0.1:1", None);
+    for path in [
+        "/DeviceTraffic/endAMergedRoute",
+        "/school_bus_cloud/DeviceTraffic/endAMergedRoute",
+    ] {
+        assert_eq!(
+            post(app.clone(), path, merged_sample(), None).await["ReaxiumResponse"]["message"],
+            "Invalid Authentication"
+        );
+        for invalid in [Value::Null, json!(0), json!(-1), json!("bad"), json!(1.5)] {
+            let mut input = merged_sample();
+            let object = input["ReaxiumParameters"]["DeviceTraffic"]
+                .as_object_mut()
+                .unwrap();
+            if invalid.is_null() {
+                object.remove("traffic_situation_id");
+            } else {
+                object.insert("traffic_situation_id".into(), invalid);
+            }
+            assert!(
+                post(app.clone(), path, input, Some("test-password")).await["ReaxiumResponse"]
+                    ["message"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("Invalid Parameters")
+            );
+        }
+    }
+}
+
+async fn check_merged_end(pool: &MySqlPool) {
+    sqlx::query("INSERT INTO traffic_type VALUES (4,'ROUTE END')")
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO device_activity (device_id,route_id) VALUES (43,999)")
+        .execute(pool)
+        .await
+        .unwrap();
+    let passengers_before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM traffic")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    for path in [
+        "/DeviceTraffic/endAMergedRoute",
+        "/school_bus_cloud/DeviceTraffic/endAMergedRoute",
+    ] {
+        sqlx::query("INSERT INTO device_activity (device_id,route_id) VALUES (42,999)")
+            .execute(pool)
+            .await
+            .unwrap();
+        let mut receiver = zeromq::PullSocket::new();
+        let endpoint = receiver
+            .bind("tcp://127.0.0.1:0")
+            .await
+            .unwrap()
+            .to_string();
+        let udp = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let app = make_app(pool.clone(), &endpoint, Some(udp.local_addr().unwrap()));
+        let mut input = merged_sample();
+        let r = &mut input["ReaxiumParameters"]["DeviceTraffic"];
+        r["traffic_date"] = json!("2026-11-08 09::30::00");
+        r["traffic_situation_id"] = json!("2");
+        r["traffic_type_id"] = json!(3);
+        let result = post(app.clone(), path, input.clone(), Some("test-password")).await;
+        assert_eq!(result["ReaxiumResponse"]["code"], 0, "{result}");
+        let rows = sqlx::query("SELECT id_route,id_stop,traffic_type_id,traffic_situation_id,CAST(traffic_date AS CHAR) AS event_date,assigned_bus FROM device_traffic ORDER BY device_traffic_id DESC LIMIT 2").fetch_all(pool).await.unwrap();
+        for (row, route, stop, bus) in [
+            (&rows[0], 8, 11, "REQUEST-BUS"),
+            (&rows[1], 7, 10, "ROUTE-BUS"),
+        ] {
+            assert_eq!(row.get::<i64, _>("id_route"), route);
+            assert_eq!(row.get::<i64, _>("id_stop"), stop);
+            assert_eq!(row.get::<i32, _>("traffic_type_id"), 4);
+            assert_eq!(row.get::<i32, _>("traffic_situation_id"), 2);
+            assert_eq!(row.get::<String, _>("event_date"), "2026-11-08 09:30:00");
+            assert_eq!(row.get::<String, _>("assigned_bus"), bus);
+        }
+        let remaining: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM device_activity WHERE device_id=42")
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            remaining, 0,
+            "clears all device activity, including route 999"
+        );
+        let other: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM device_activity WHERE device_id=43")
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        assert_eq!(other, 1);
+        let mut routes = Vec::new();
+        for _ in 0..4 {
+            let message = tokio::time::timeout(Duration::from_secs(2), receiver.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            let value: Value = serde_json::from_str(&String::try_from(message).unwrap()).unwrap();
+            assert_eq!(value["content"]["typeTrafficId"], 4);
+            assert_eq!(value["content"]["traffic_label"], "ROUTE_MAJOR_TRAFFIC");
+            routes.push(value["content"]["id_route"].as_i64().unwrap());
+        }
+        routes.sort();
+        assert_eq!(routes, [7, 7, 8, 8]);
+        for route in [7_u32, 8] {
+            let mut bytes = [0u8; 1024];
+            let n = tokio::time::timeout(Duration::from_secs(2), udp.recv(&mut bytes))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(&bytes[n - 9..n - 5], &route.to_be_bytes());
+            assert_eq!(&bytes[n - 11..n - 9], &402_u16.to_be_bytes());
+        }
+        // An activity-delete failure must roll back the current route's traffic insert.
+        sqlx::query("INSERT INTO device_activity (device_id,route_id) VALUES (42,7)")
+            .execute(pool)
+            .await
+            .unwrap();
+        sqlx::raw_sql("CREATE TRIGGER reject_merged_end_delete BEFORE DELETE ON device_activity FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='test merged end rollback'").execute(pool).await.unwrap();
+        let before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM device_traffic")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+        let result = post(app, path, input, Some("test-password")).await;
+        assert_eq!(result["ReaxiumResponse"]["code"], 3);
+        assert_eq!(
+            result["ReaxiumResponse"]["object"]["routes"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        let after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM device_traffic")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+        assert_eq!(after, before);
+        let remaining: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM device_activity WHERE device_id=42")
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        assert_eq!(remaining, 1);
+        sqlx::raw_sql("DROP TRIGGER reject_merged_end_delete")
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+    let passengers_after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM traffic")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        passengers_after, passengers_before,
+        "end does not automatically drop off passengers"
+    );
 }

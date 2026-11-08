@@ -1,7 +1,7 @@
 mod broadcast;
 mod merged;
 mod model;
-pub use merged::begin_merged_route;
+pub use merged::{begin_merged_route, end_merged_route};
 mod repository;
 mod vision;
 
@@ -22,6 +22,7 @@ static NEXT_REQUEST: AtomicU64 = AtomicU64::new(1);
 pub(super) enum Action {
     Begin,
     BeginMerged,
+    EndMerged,
     End,
     Interrupt,
     Send(i64),
@@ -37,7 +38,7 @@ impl Action {
             Self::NextStop => 5,
             Self::SkippedStop => 18,
             Self::ManualSkippedStop => 27,
-            Self::End => 4,
+            Self::End | Self::EndMerged => 4,
             Self::Interrupt => 14,
             Self::Send(id) | Self::Notification(id) => id,
         }

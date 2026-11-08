@@ -651,3 +651,30 @@ curl -i -u "$REAXIUM_API_USER:$REAXIUM_API_PASSWORD" \
 The isolated `merged_route_starts_select_stops_save_each_route_and_publish` test
 uses the same disposable database as other integration tests. Run database tests
 serially (`--test-threads=1`).
+
+## End merged routes
+
+`POST /DeviceTraffic/endAMergedRoute` and
+`/school_bus_cloud/DeviceTraffic/endAMergedRoute` use the existing Basic credentials
+and `ReaxiumParameters.DeviceTraffic`. Use the merged-start fields plus required
+`traffic_situation_id` (a positive integer or numeric string). The service forces
+traffic type **4**, preserving the supplied situation, date and trace ID. Use the
+trace ID of the run being ended. Stop selection and route-assigned bus lookup are
+the same as merged start; no `stop_id` is required.
+
+Each route records its own end event and clears **all device_activity rows for the
+device**, including routes not listed in the request. Other devices are unaffected.
+It sends Vision event **402** when enabled and publishes `ROUTE_MAJOR_TRAFFIC` for
+each route. It does not automatically drop off passengers or create alerts.
+
+Routes commit independently, with each route's traffic and activity deletion in a
+transaction. A later failure can leave earlier routes saved and activity cleared.
+Delivery failures report per-route saved status while remaining routes continue.
+The response and operational differences from PHP match the merged-start endpoint.
+
+```bash
+curl -i -u "$REAXIUM_API_USER:$REAXIUM_API_PASSWORD" \
+  -H 'Content-Type: application/json' \
+  --data-binary @run-and-install/json/end-merged-route.example.json \
+  "$BASE_URL/DeviceTraffic/endAMergedRoute"
+```
