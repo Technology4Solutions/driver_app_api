@@ -2,7 +2,7 @@ use crate::device_status::model::number;
 use chrono::NaiveDateTime;
 use serde::Deserialize;
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct BeginRoute {
     #[serde(deserialize_with = "number")]
     pub device_id: i64,

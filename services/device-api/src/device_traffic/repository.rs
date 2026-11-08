@@ -45,7 +45,10 @@ pub(super) async fn store(
         .expect("validated bus ID");
     let mut assigned_bus: Option<String> = if matches!(
         action,
-        Action::Notification(_) | Action::SkippedStop | Action::ManualSkippedStop
+        Action::Notification(_)
+            | Action::SkippedStop
+            | Action::ManualSkippedStop
+            | Action::BeginMerged
     ) {
         // Alarm/sendNotification follows PHP's latest route assignment lookup.
         sqlx::query_scalar("SELECT CAST(b.bus_number AS CHAR) FROM bus_routes_relationship rel LEFT JOIN bus b ON b.bus_id=rel.bus_id WHERE rel.id_route=? ORDER BY rel.last_update DESC LIMIT 1")
@@ -53,10 +56,12 @@ pub(super) async fn store(
     } else {
         None
     };
-    if !matches!(action, Action::SkippedStop | Action::ManualSkippedStop)
-        && assigned_bus
-            .as_ref()
-            .is_none_or(|number| number.trim().is_empty())
+    if !matches!(
+        action,
+        Action::SkippedStop | Action::ManualSkippedStop | Action::BeginMerged
+    ) && assigned_bus
+        .as_ref()
+        .is_none_or(|number| number.trim().is_empty())
     {
         // Fall back to the reported bus when the route assignment is unavailable.
         assigned_bus =
@@ -71,7 +76,8 @@ pub(super) async fn store(
             bus_id,
             route_id = request.route_id,
             assignment_source = match action {
-                Action::SkippedStop | Action::ManualSkippedStop => "latest_route_assignment",
+                Action::SkippedStop | Action::ManualSkippedStop | Action::BeginMerged =>
+                    "latest_route_assignment",
                 Action::Notification(_) => "latest_route_assignment_or_request_bus",
                 _ => "request_bus",
             },

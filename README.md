@@ -613,3 +613,41 @@ convergence failures so Jenkins shows Docker errors before the SSH exception. Th
 health check verifies the HTTP listener after startup, not ongoing dependency health.
 Tests in test-deployment.py are offline; Jenkins/Vault/Swarm integration requires
 configured infrastructure. Ignored database integration tests remain in GitHub CI.
+
+## Start merged routes
+
+`POST /DeviceTraffic/beginAMergeRoute` and
+`/school_bus_cloud/DeviceTraffic/beginAMergeRoute` use the existing Basic credentials
+and `ReaxiumParameters.DeviceTraffic`. Required fields are `device_id`, `route_ids`
+(a comma-separated string, e.g. `"107,108"`), `driver_id`, `trace_id`, `latitude`,
+`longitude`, `bus_info` (bus ID), and `traffic_date`. No stop ID is required.
+
+For each route in input order, choose the nearest stop whose configured
+`routes_stops_relationship.stop_ratio` contains the event location. If none contains
+it, choose the nearest stop overall. Distances use Haversine with Earth radius
+6,371,000 meters; equal distances retain route stop order. An empty stop set returns
+an explicit error. Traffic type is forced to 3 and situation to 1; the supplied event
+date is preserved. Each route creates its own `device_traffic` and `device_activity`
+records, sends Vision event 401 when enabled, and publishes `ROUTE_MAJOR_TRAFFIC`.
+`assigned_bus` uses that route's latest bus assignment, matching PHP, without a
+fallback to `bus_info`. This does not create a combined route definition.
+
+Each route commits independently. Earlier routes can remain saved after a later
+stop-selection or database failure. Delivery failures are reported per route while
+remaining routes are still processed. Full success returns code 0 and an empty
+object array; errors return code 3 with `object.routes` containing attempted route
+results. Inspect those results and the database before retrying; repeated route
+IDs and repeated requests are not deduplicated. Compared with PHP, this API retains
+Basic authentication, stricter validation, per-route transactions, explicit missing
+stop errors and downstream delivery reporting.
+
+```bash
+curl -i -u "$REAXIUM_API_USER:$REAXIUM_API_PASSWORD" \
+  -H 'Content-Type: application/json' \
+  --data-binary @run-and-install/json/begin-merged-route.example.json \
+  "$BASE_URL/DeviceTraffic/beginAMergeRoute"
+```
+
+The isolated `merged_route_starts_select_stops_save_each_route_and_publish` test
+uses the same disposable database as other integration tests. Run database tests
+serially (`--test-threads=1`).

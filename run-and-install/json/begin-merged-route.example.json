@@ -1,0 +1,14 @@
+{
+  "ReaxiumParameters": {
+    "DeviceTraffic": {
+      "device_id": 935,
+      "driver_id": 71655,
+      "trace_id": "test-merged-route-001",
+      "latitude": 27.1975,
+      "longitude": -80.2528,
+      "bus_info": "364",
+      "traffic_date": "2026-10-21 08:00:00",
+      "route_ids": "107,108"
+    }
+  }
+}

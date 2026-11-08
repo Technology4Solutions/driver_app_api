@@ -1,5 +1,7 @@
 mod broadcast;
+mod merged;
 mod model;
+pub use merged::begin_merged_route;
 mod repository;
 mod vision;
 
@@ -19,6 +21,7 @@ static NEXT_REQUEST: AtomicU64 = AtomicU64::new(1);
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum Action {
     Begin,
+    BeginMerged,
     End,
     Interrupt,
     Send(i64),
@@ -30,7 +33,7 @@ pub(super) enum Action {
 impl Action {
     fn traffic_type(self) -> i64 {
         match self {
-            Self::Begin => 3,
+            Self::Begin | Self::BeginMerged => 3,
             Self::NextStop => 5,
             Self::SkippedStop => 18,
             Self::ManualSkippedStop => 27,
@@ -216,6 +219,16 @@ async fn handle(
         ),
         action => action,
     };
+    process(pool, config, vision, request, action).await
+}
+
+async fn process(
+    pool: MySqlPool,
+    config: Arc<Config>,
+    vision: Arc<VisionConfig>,
+    request: BeginRoute,
+    action: Action,
+) -> Json<Value> {
     let saved = match repository::store(&pool, &request, action).await {
         Ok(saved) => saved,
         Err(error) => {

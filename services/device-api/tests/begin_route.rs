@@ -1131,3 +1131,198 @@ async fn manual_skipped_stop_requires_authentication_and_valid_event_date() {
         }
     }
 }
+
+fn merged_sample() -> Value {
+    let mut input = sample();
+    let r = &mut input["ReaxiumParameters"]["DeviceTraffic"];
+    r.as_object_mut().unwrap().remove("route_id");
+    r.as_object_mut().unwrap().remove("stop_id");
+    r["route_ids"] = json!("7,8");
+    r["latitude"] = json!(0);
+    r["longitude"] = json!(0);
+    r["traffic_type_id"] = json!(14);
+    r["traffic_situation_id"] = json!(2);
+    input
+}
+
+#[tokio::test]
+async fn merged_routes_validate_authentication_and_comma_separated_ids() {
+    let pool = MySqlPoolOptions::new()
+        .connect_lazy("mysql://unused:unused@127.0.0.1:1/unused")
+        .unwrap();
+    let app = make_app(pool, "tcp://127.0.0.1:1", None);
+    for path in [
+        "/DeviceTraffic/beginAMergeRoute",
+        "/school_bus_cloud/DeviceTraffic/beginAMergeRoute",
+    ] {
+        assert_eq!(
+            post(app.clone(), path, merged_sample(), None).await["ReaxiumResponse"]["message"],
+            "Invalid Authentication"
+        );
+        for ids in [
+            Value::Null,
+            json!(""),
+            json!("7,"),
+            json!([7, 8]),
+            json!("7,-1"),
+            json!("bad"),
+        ] {
+            let mut input = merged_sample();
+            input["ReaxiumParameters"]["DeviceTraffic"]["route_ids"] = ids;
+            assert!(
+                post(app.clone(), path, input, Some("test-password")).await["ReaxiumResponse"]
+                    ["message"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("Invalid Parameters")
+            );
+        }
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires disposable TEST_DATABASE_URL named device_api_migration_test; run with --test-threads=1"]
+async fn merged_route_starts_select_stops_save_each_route_and_publish() {
+    let pool = MySqlPoolOptions::new()
+        .max_connections(5)
+        .connect(&std::env::var("TEST_DATABASE_URL").unwrap())
+        .await
+        .unwrap();
+    let database: String = sqlx::query_scalar("SELECT DATABASE()")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        database, "device_api_migration_test",
+        "refusing to change a non-test database"
+    );
+    sqlx::raw_sql(include_str!("fixtures/device_status.sql"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::raw_sql(include_str!("fixtures/begin_route.sql"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::raw_sql("CREATE TABLE routes_stops_relationship (id_route BIGINT,id_stop BIGINT,order_stop INT,stop_ratio DOUBLE);
+        UPDATE stops SET stop_latitude=0,stop_longitude=0.001 WHERE id_stop=9;
+        INSERT INTO stops (id_stop,stop_name,stop_number,stop_latitude,stop_longitude) VALUES (10,'Containing stop','S10',0,0.002),(11,'Nearest outside','S11',0,0.003);
+        INSERT INTO routes_stops_relationship VALUES (7,9,1,1),(7,10,2,500),(8,11,1,1);
+        INSERT INTO routes (id_route,status_id,route_number,route_name,route_type) VALUES (8,1,'8','Route 8',1);
+        INSERT INTO bus_routes_relationship VALUES (2,8,'2026-01-01 00:00:00');
+        INSERT INTO business_routes VALUES (8,1);")
+        .execute(&pool).await.unwrap();
+    let mut receiver = zeromq::PullSocket::new();
+    let endpoint = receiver
+        .bind("tcp://127.0.0.1:0")
+        .await
+        .unwrap()
+        .to_string();
+    let udp = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let app = make_app(pool.clone(), &endpoint, Some(udp.local_addr().unwrap()));
+    let result = post(
+        app.clone(),
+        "/DeviceTraffic/beginAMergeRoute",
+        merged_sample(),
+        Some("test-password"),
+    )
+    .await;
+    assert_eq!(result["ReaxiumResponse"]["code"], 0, "{result}");
+    let rows = sqlx::query("SELECT *,CAST(traffic_date AS CHAR) AS event_date FROM device_traffic ORDER BY device_traffic_id").fetch_all(&pool).await.unwrap();
+    assert_eq!(rows.len(), 2);
+    for (row, route_id, stop_id, assigned_bus) in [
+        (&rows[0], 7, 10, "ROUTE-BUS"),
+        (&rows[1], 8, 11, "REQUEST-BUS"),
+    ] {
+        assert_eq!(row.get::<i64, _>("id_route"), route_id);
+        assert_eq!(row.get::<i64, _>("id_stop"), stop_id);
+        assert_eq!(row.get::<i32, _>("traffic_type_id"), 3);
+        assert_eq!(row.get::<i32, _>("traffic_situation_id"), 1);
+        assert_eq!(row.get::<String, _>("assigned_bus"), assigned_bus);
+        assert_eq!(row.get::<String, _>("event_date"), "2026-10-21 08:00:00");
+    }
+    let active: Vec<i64> =
+        sqlx::query_scalar("SELECT route_id FROM device_activity ORDER BY device_activity_id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(active, [7, 8]);
+    let mut published = Vec::new();
+    for _ in 0..4 {
+        let message = tokio::time::timeout(Duration::from_secs(2), receiver.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let value: Value = serde_json::from_str(&String::try_from(message).unwrap()).unwrap();
+        assert_eq!(value["content"]["traffic_label"], "ROUTE_MAJOR_TRAFFIC");
+        assert_eq!(value["content"]["typeTrafficId"], 3);
+        published.push(value["content"]["id_route"].as_i64().unwrap());
+    }
+    published.sort();
+    assert_eq!(published, [7, 7, 8, 8]);
+    for route_id in [7_u32, 8] {
+        let mut bytes = [0u8; 1024];
+        let n = tokio::time::timeout(Duration::from_secs(2), udp.recv(&mut bytes))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(&bytes[n - 9..n - 5], &route_id.to_be_bytes());
+        assert_eq!(&bytes[n - 11..n - 9], &401_u16.to_be_bytes());
+    }
+    // A missing second route leaves the first route saved and reports partial work.
+    let mut input = merged_sample();
+    input["ReaxiumParameters"]["DeviceTraffic"]["route_ids"] = json!("7,999");
+    let result = post(
+        app,
+        "/school_bus_cloud/DeviceTraffic/beginAMergeRoute",
+        input,
+        Some("test-password"),
+    )
+    .await;
+    assert_eq!(result["ReaxiumResponse"]["code"], 3);
+    assert_eq!(
+        result["ReaxiumResponse"]["object"]["routes"][0]["response"]["code"],
+        0
+    );
+    assert_eq!(
+        result["ReaxiumResponse"]["object"]["routes"][1]["route_id"],
+        999
+    );
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM device_traffic")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 3);
+    // Delivery failures must not prevent the other requested routes being saved.
+    let app = make_app(pool.clone(), &endpoint, None);
+    let result = post(
+        app,
+        "/DeviceTraffic/beginAMergeRoute",
+        merged_sample(),
+        Some("test-password"),
+    )
+    .await;
+    assert_eq!(result["ReaxiumResponse"]["code"], 3);
+    assert_eq!(
+        result["ReaxiumResponse"]["object"]["routes"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    for item in result["ReaxiumResponse"]["object"]["routes"]
+        .as_array()
+        .unwrap()
+    {
+        assert_eq!(item["response"]["object"]["database_saved"], true);
+        assert_eq!(
+            item["response"]["object"]["vision_status"],
+            "not_configured"
+        );
+    }
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM device_traffic")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 5);
+}

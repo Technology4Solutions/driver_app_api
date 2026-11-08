@@ -10,6 +10,14 @@ use tower_http::trace::TraceLayer;
 pub fn router(metrics: Metrics) -> Router {
     Router::new()
         .route(
+            "/DeviceTraffic/beginAMergeRoute",
+            axum::routing::post(device_traffic::begin_merged_route),
+        )
+        .route(
+            "/school_bus_cloud/DeviceTraffic/beginAMergeRoute",
+            axum::routing::post(device_traffic::begin_merged_route),
+        )
+        .route(
             "/Alarm/sendManualSkippedStopNotification",
             axum::routing::post(device_traffic::send_manual_skipped_stop_notification),
         )
