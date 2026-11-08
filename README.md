@@ -120,16 +120,16 @@ strict date/coordinate/required-field validation. Charging accepts Java boolean/
 Status broadcasts now use HTTP `WebSocketPusher/dispatch`, with the envelope
 `ReaxiumParameters.WebSocketPusher.content`, Java-style device/status/activity fields,
 device serial as `gps_serial`, passenger ID lists, and `last_associated_traffic=3`.
-The route stop join uses Java's `routes_stops_relationship` table. Configure dispatcher Basic auth
-explicitly; Java's hardcoded dispatcher credentials are not copied into Rust.
+The route stop join uses Java's `routes_stops_relationship` table. Dispatcher Basic auth uses the shared `REAXIUM_API_USER` and `REAXIUM_API_PASSWORD`
+credentials, which must match the receiving ReaxiumCloud API.
 
 ```dotenv
 APP_ENV=local
 # Blank/unset: disabled for local, enabled for other APP_ENV values.
 BROADCAST_ENABLED=
 DEVICES_API_EXPORT_DEVICE_STATUS_URL=https://your-backend/school_bus_cloud/WebSocketPusher/dispatch
-DEVICE_STATUS_BROADCAST_USERNAME=your_dispatcher_username
-DEVICE_STATUS_BROADCAST_PASSWORD=your_dispatcher_password
+REAXIUM_API_USER=your_dispatcher_username
+REAXIUM_API_PASSWORD=your_dispatcher_password
 RABBITMQ_URL=amqp://guest:guest@127.0.0.1:5674/%2f
 REDIS_URL=redis://127.0.0.1:6381/
 DEVICE_STATUS_QUEUE=devicesAPIQueue
@@ -521,8 +521,8 @@ when deriving the database host). Explicit pool settings are validated before st
 - RABBITMQ_USER and RABBITMQ_PASSWORD. They initialize the bundled broker and must
   continue to match existing broker storage. RabbitMQ and Redis have dedicated
   stack volumes and internal endpoints; host ports are not published.
-- DEVICES_API_EXPORT_DEVICE_STATUS_URL, DEVICE_STATUS_BROADCAST_USERNAME and
-  DEVICE_STATUS_BROADCAST_PASSWORD for enabled HTTP broadcasts. BROADCAST_ENABLED
+- DEVICES_API_EXPORT_DEVICE_STATUS_URL, REAXIUM_API_USER and
+  REAXIUM_API_PASSWORD for enabled HTTP broadcasts. BROADCAST_ENABLED
   defaults to true for DEV/PROD; set false in the bundle to disable it.
 - Existing optional DEVICE_STATUS_*, VISION_*, DB_* settings, DASHBOARD_BROADCAST_ENABLED,
   RABBITMQ_URL and REDIS_URL can also be supplied. Route dashboard broadcasts and

@@ -110,8 +110,14 @@ class ConfigurationTests(unittest.TestCase):
         result = module.configuration({'ENVIRONMENT': 'DEV'}, bundle, 'api')
         self.assertEqual(result['DB_HOST'], 'native')
         del bundle['BROADCAST_ENABLED']
-        with self.assertRaises(ValueError):
+        with self.assertRaises(module.ConfigurationError) as error:
             module.configuration({'ENVIRONMENT': 'DEV'}, bundle, 'api')
+        self.assertEqual(str(error.exception), 'Missing enabled broadcast setting: DEVICES_API_EXPORT_DEVICE_STATUS_URL')
+        bundle['DEVICES_API_EXPORT_DEVICE_STATUS_URL'] = 'https://backend.test/WebSocketPusher/dispatch'
+        result = module.configuration({'ENVIRONMENT': 'DEV'}, bundle, 'api')
+        self.assertEqual(result['BROADCAST_ENABLED'], 'true')
+        self.assertEqual(result['REAXIUM_API_USER'], 'api')
+        self.assertEqual(result['REAXIUM_API_PASSWORD'], 'test')
 
     def test_rejects_missing_broker_secret_and_ignores_executable_settings(self):
         bundle = self.bundle()

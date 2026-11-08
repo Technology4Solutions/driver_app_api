@@ -77,7 +77,7 @@ def configuration(environ, bundle, mode):
     result['APP_ENV'] = environ['ENVIRONMENT'].lower()
     result.setdefault('BROADCAST_ENABLED', 'true')
     if result['BROADCAST_ENABLED'] == 'true':
-        for key in ['DEVICES_API_EXPORT_DEVICE_STATUS_URL', 'DEVICE_STATUS_BROADCAST_USERNAME', 'DEVICE_STATUS_BROADCAST_PASSWORD']:
+        for key in ['DEVICES_API_EXPORT_DEVICE_STATUS_URL', 'REAXIUM_API_USER', 'REAXIUM_API_PASSWORD']:
             if not result.get(key):
                 raise ConfigurationError(f'Missing enabled broadcast setting: {key}')
     return result

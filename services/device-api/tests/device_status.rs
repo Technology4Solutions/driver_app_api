@@ -206,8 +206,8 @@ async fn queues_filters_persists_and_broadcasts_like_java() {
         "DEVICES_API_EXPORT_DEVICE_STATUS_URL",
         format!("http://{}/dispatch", listener.local_addr().unwrap()),
     );
-    std::env::set_var("DEVICE_STATUS_BROADCAST_USERNAME", "broadcast-user");
-    std::env::set_var("DEVICE_STATUS_BROADCAST_PASSWORD", "broadcast-pass");
+    std::env::set_var("REAXIUM_API_USER", "broadcast-user");
+    std::env::set_var("REAXIUM_API_PASSWORD", "broadcast-pass");
     let server = tokio::spawn(async move {
         axum::serve(listener, http).await.unwrap();
     });

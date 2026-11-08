@@ -21,8 +21,8 @@ impl Broadcaster {
             .unwrap_or_else(|| (!local).to_string())
             .parse()?;
         let url = env::var("DEVICES_API_EXPORT_DEVICE_STATUS_URL").unwrap_or_default();
-        let username = env::var("DEVICE_STATUS_BROADCAST_USERNAME").unwrap_or_default();
-        let password = env::var("DEVICE_STATUS_BROADCAST_PASSWORD").unwrap_or_default();
+        let username = env::var("REAXIUM_API_USER").unwrap_or_default();
+        let password = env::var("REAXIUM_API_PASSWORD").unwrap_or_default();
         if enabled && (url.is_empty() || username.is_empty() || password.is_empty()) {
             return Err("enabled status broadcasts require URL, username and password".into());
         }
