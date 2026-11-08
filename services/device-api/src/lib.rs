@@ -9,6 +9,38 @@ use tower_http::trace::TraceLayer;
 
 pub fn router(metrics: Metrics) -> Router {
     Router::new()
+        .route(
+            "/Alarm/sendManualSkippedStopNotification",
+            axum::routing::post(device_traffic::send_manual_skipped_stop_notification),
+        )
+        .route(
+            "/school_bus_cloud/Alarm/sendManualSkippedStopNotification",
+            axum::routing::post(device_traffic::send_manual_skipped_stop_notification),
+        )
+        .route(
+            "/Alarm/sendSkippedStopNotification",
+            axum::routing::post(device_traffic::send_skipped_stop_notification),
+        )
+        .route(
+            "/school_bus_cloud/Alarm/sendSkippedStopNotification",
+            axum::routing::post(device_traffic::send_skipped_stop_notification),
+        )
+        .route(
+            "/Alarm/sendNextStopNotification",
+            axum::routing::post(device_traffic::send_next_stop_notification),
+        )
+        .route(
+            "/school_bus_cloud/Alarm/sendNextStopNotification",
+            axum::routing::post(device_traffic::send_next_stop_notification),
+        )
+        .route(
+            "/Alarm/sendNotification",
+            axum::routing::post(device_traffic::send_notification),
+        )
+        .route(
+            "/school_bus_cloud/Alarm/sendNotification",
+            axum::routing::post(device_traffic::send_notification),
+        )
         .route("/", get(|| async { "Hello, world!" }))
         .route(
             "/device/DeviceStatus/update",
@@ -33,6 +65,22 @@ pub fn router(metrics: Metrics) -> Router {
         .route(
             "/school_bus_cloud/DeviceTraffic/endARoute",
             axum::routing::post(device_traffic::end_route),
+        )
+        .route(
+            "/DeviceTraffic/interruptARoute",
+            axum::routing::post(device_traffic::interrupt_route),
+        )
+        .route(
+            "/school_bus_cloud/DeviceTraffic/interruptARoute",
+            axum::routing::post(device_traffic::interrupt_route),
+        )
+        .route(
+            "/DeviceTraffic/sendTraffic",
+            axum::routing::post(device_traffic::send_traffic),
+        )
+        .route(
+            "/school_bus_cloud/DeviceTraffic/sendTraffic",
+            axum::routing::post(device_traffic::send_traffic),
         )
         .layer(middleware::from_fn_with_state(metrics, telemetry::observe))
         .layer(TraceLayer::new_for_http())

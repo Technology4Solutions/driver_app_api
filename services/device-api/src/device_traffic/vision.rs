@@ -48,6 +48,9 @@ pub(super) async fn dispatch(
     request: &BeginRoute,
     action: Action,
 ) -> Result<&'static str, Error> {
+    if action.vision_event().is_none() {
+        return Ok("skipped_unsupported_traffic");
+    }
     if !config.enabled {
         return Ok("disabled");
     }
@@ -114,10 +117,20 @@ pub(super) fn encode(
     avl.extend(coordinate(request.longitude).to_be_bytes());
     avl.extend(coordinate(request.latitude).to_be_bytes());
     avl.extend([0, 0, 0, 0, 2, 0, 0]); // altitude, angle, satellites, speed
-    avl.extend(action.vision_event().to_be_bytes());
+    avl.extend(
+        action
+            .vision_event()
+            .expect("supported Vision traffic")
+            .to_be_bytes(),
+    );
     avl.extend(1u16.to_be_bytes()); // total IO elements
     avl.extend([0, 0, 0, 0, 0, 1]); // 1-byte, 2-byte and 4-byte element counts
-    avl.extend(action.vision_event().to_be_bytes());
+    avl.extend(
+        action
+            .vision_event()
+            .expect("supported Vision traffic")
+            .to_be_bytes(),
+    );
     avl.extend((request.route_id as u32).to_be_bytes());
     avl.extend([0, 0, 0, 0]); // 8-byte and variable-sized element counts
     let hex_length = avl.len() * 2;
@@ -151,7 +164,7 @@ mod tests {
         .unwrap();
         let request: BeginRoute =
             serde_json::from_value(envelope["ReaxiumParameters"]["DeviceTraffic"].clone()).unwrap();
-        for action in [Action::Begin, Action::End] {
+        for action in [Action::Begin, Action::End, Action::Interrupt] {
             assert_eq!(
                 dispatch(&pool, &config, &request, action).await.unwrap(),
                 "disabled"
@@ -164,6 +177,42 @@ mod tests {
         .await
         .is_err());
     }
+    #[tokio::test]
+    async fn stop_events_skip_vision_without_database_or_destination() {
+        let pool = sqlx::mysql::MySqlPoolOptions::new()
+            .connect_lazy("mysql://unused:unused@127.0.0.1:1/unused")
+            .unwrap();
+        let config = Config {
+            enabled: true,
+            destination: None,
+            timezone: chrono_tz::America::New_York,
+        };
+        let envelope: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../run-and-install/json/begin-route.example.json"
+        ))
+        .unwrap();
+        let request: BeginRoute =
+            serde_json::from_value(envelope["ReaxiumParameters"]["DeviceTraffic"].clone()).unwrap();
+        for id in [15, 16, 9, 17, 22, 99] {
+            assert_eq!(
+                dispatch(&pool, &config, &request, Action::Send(id))
+                    .await
+                    .unwrap(),
+                "skipped_unsupported_traffic"
+            );
+        }
+        for (id, action) in [
+            (3, Action::Begin),
+            (4, Action::End),
+            (14, Action::Interrupt),
+        ] {
+            assert_eq!(
+                encode("gps-42", &request, 1792584000000, 7, Action::Send(id)),
+                encode("gps-42", &request, 1792584000000, 7, action)
+            );
+        }
+    }
+
     #[test]
     fn packet_matches_original_php_encoder() {
         let envelope: serde_json::Value = serde_json::from_str(include_str!(
@@ -173,6 +222,10 @@ mod tests {
         let request: BeginRoute =
             serde_json::from_value(envelope["ReaxiumParameters"]["DeviceTraffic"].clone()).unwrap();
         let packet = encode("gps-42", &request, 1792584000000, 7, Action::Begin);
+        assert_eq!(
+            encode("gps-42", &request, 1792584000000, 7, Action::Interrupt),
+            encode("gps-42", &request, 1792584000000, 7, Action::End)
+        );
         let hex: String = packet.iter().map(|b| format!("{b:02x}")).collect();
         // Generated from ReaxiumCloud's generateHeader + generateAvlData, packet ID 7.
         assert_eq!(hex,"005ecafe010700066770732d34328e01000001a15e55220001d02a65001036025800000000020000019100010000000000010191000015d60000000001");

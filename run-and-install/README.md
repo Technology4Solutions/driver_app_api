@@ -167,3 +167,12 @@ Multi-device datasets and concurrent HTTP/HTTPS tests are available in
 `python3 run-and-install/load-test/export-devices.py --limit 1000` from the project
 root; the exporter is read-only. The k6 runner performs real writes and requires
 an explicitly configured isolated test API URL and credentials.
+
+To interrupt a route and automatically drop off its remaining passengers:
+
+```bash
+./run-and-install/test-api.sh --interrupt-route run-and-install/json/interrupt-route.example.json
+```
+
+Run from the project root and replace example IDs, trace and date with test data.
+This uses the same credentials as `--end-route` and writes to the configured database.

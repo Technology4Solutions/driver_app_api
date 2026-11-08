@@ -4,6 +4,8 @@ usage() {
   cat <<'HELP'
 Usage:
   test-api.sh                              Check greeting and liveness (no writes).
+  test-api.sh --interrupt-route PAYLOAD.json Interrupt a route and drop off passengers.
+  test-api.sh --send-traffic PAYLOAD.json   Send a device traffic event.
   test-api.sh --end-route PAYLOAD.json      End a route and clear device activity.
   test-api.sh --begin-route PAYLOAD.json    Start a route (database + Vision + dashboards).
   test-api.sh --device-status PAYLOAD.json  Queue supplied telemetry for background processing.
@@ -20,9 +22,11 @@ endpoint='/device/DeviceStatus/update'
 case "${1:-}" in
   '') [[ $# -eq 0 ]] || { usage; exit 2; } ;;
   --help|-h) usage; exit 0 ;;
-  --device-status|--begin-route|--end-route)
+  --device-status|--begin-route|--end-route|--interrupt-route|--send-traffic)
     [[ $# -eq 2 && -f "$2" ]] || { usage >&2; exit 2; }
     payload="$2"
+    if [[ "$1" == --send-traffic ]]; then endpoint="/DeviceTraffic/sendTraffic"; fi
+    if [[ "$1" == --interrupt-route ]]; then endpoint="/DeviceTraffic/interruptARoute"; fi
     if [[ "$1" == --end-route ]]; then endpoint="/DeviceTraffic/endARoute"; fi
     if [[ "$1" == --begin-route ]]; then endpoint="/DeviceTraffic/beginARoute"; fi
     ;;

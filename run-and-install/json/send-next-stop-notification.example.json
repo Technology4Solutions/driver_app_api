@@ -1,0 +1,15 @@
+{
+  "ReaxiumParameters": {
+    "Notification": {
+      "notification_type": 5,
+      "device_id": 935,
+      "stop_id": 1061,
+      "route_id": 107,
+      "driver_id": 19626,
+      "trace_id": "test-next-stop-001",
+      "latitude": 27.1975,
+      "longitude": -80.2528,
+      "bus_info": "364"
+    }
+  }
+}

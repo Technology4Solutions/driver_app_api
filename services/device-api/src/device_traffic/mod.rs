@@ -20,18 +20,30 @@ static NEXT_REQUEST: AtomicU64 = AtomicU64::new(1);
 pub(super) enum Action {
     Begin,
     End,
+    Interrupt,
+    Send(i64),
+    Notification(i64),
+    NextStop,
+    SkippedStop,
+    ManualSkippedStop,
 }
 impl Action {
     fn traffic_type(self) -> i64 {
         match self {
             Self::Begin => 3,
+            Self::NextStop => 5,
+            Self::SkippedStop => 18,
+            Self::ManualSkippedStop => 27,
             Self::End => 4,
+            Self::Interrupt => 14,
+            Self::Send(id) | Self::Notification(id) => id,
         }
     }
-    fn vision_event(self) -> u16 {
-        match self {
-            Self::Begin => 401,
-            Self::End => 402,
+    fn vision_event(self) -> Option<u16> {
+        match self.traffic_type() {
+            3 => Some(401),
+            4 | 14 => Some(402),
+            _ => None,
         }
     }
 }
@@ -58,6 +70,80 @@ pub async fn end_route(
     handle(pool, config, vision, headers, body, Action::End).await
 }
 
+#[tracing::instrument(skip_all, fields(request_id=NEXT_REQUEST.fetch_add(1, Ordering::Relaxed)))]
+pub async fn interrupt_route(
+    Extension(pool): Extension<MySqlPool>,
+    Extension(config): Extension<Arc<Config>>,
+    Extension(vision): Extension<Arc<VisionConfig>>,
+    headers: HeaderMap,
+    body: Result<Json<Value>, JsonRejection>,
+) -> Json<Value> {
+    handle(pool, config, vision, headers, body, Action::Interrupt).await
+}
+
+#[tracing::instrument(skip_all, fields(request_id=NEXT_REQUEST.fetch_add(1, Ordering::Relaxed)))]
+pub async fn send_traffic(
+    Extension(pool): Extension<MySqlPool>,
+    Extension(config): Extension<Arc<Config>>,
+    Extension(vision): Extension<Arc<VisionConfig>>,
+    headers: HeaderMap,
+    body: Result<Json<Value>, JsonRejection>,
+) -> Json<Value> {
+    handle(pool, config, vision, headers, body, Action::Send(0)).await
+}
+
+#[tracing::instrument(skip_all, fields(request_id=NEXT_REQUEST.fetch_add(1, Ordering::Relaxed)))]
+pub async fn send_notification(
+    Extension(pool): Extension<MySqlPool>,
+    Extension(config): Extension<Arc<Config>>,
+    Extension(vision): Extension<Arc<VisionConfig>>,
+    headers: HeaderMap,
+    body: Result<Json<Value>, JsonRejection>,
+) -> Json<Value> {
+    handle(pool, config, vision, headers, body, Action::Notification(0)).await
+}
+
+#[tracing::instrument(skip_all, fields(request_id=NEXT_REQUEST.fetch_add(1, Ordering::Relaxed)))]
+pub async fn send_next_stop_notification(
+    Extension(pool): Extension<MySqlPool>,
+    Extension(config): Extension<Arc<Config>>,
+    Extension(vision): Extension<Arc<VisionConfig>>,
+    headers: HeaderMap,
+    body: Result<Json<Value>, JsonRejection>,
+) -> Json<Value> {
+    handle(pool, config, vision, headers, body, Action::NextStop).await
+}
+
+#[tracing::instrument(skip_all, fields(request_id=NEXT_REQUEST.fetch_add(1, Ordering::Relaxed)))]
+pub async fn send_skipped_stop_notification(
+    Extension(pool): Extension<MySqlPool>,
+    Extension(config): Extension<Arc<Config>>,
+    Extension(vision): Extension<Arc<VisionConfig>>,
+    headers: HeaderMap,
+    body: Result<Json<Value>, JsonRejection>,
+) -> Json<Value> {
+    handle(pool, config, vision, headers, body, Action::SkippedStop).await
+}
+
+#[tracing::instrument(skip_all, fields(request_id=NEXT_REQUEST.fetch_add(1, Ordering::Relaxed)))]
+pub async fn send_manual_skipped_stop_notification(
+    Extension(pool): Extension<MySqlPool>,
+    Extension(config): Extension<Arc<Config>>,
+    Extension(vision): Extension<Arc<VisionConfig>>,
+    headers: HeaderMap,
+    body: Result<Json<Value>, JsonRejection>,
+) -> Json<Value> {
+    handle(
+        pool,
+        config,
+        vision,
+        headers,
+        body,
+        Action::ManualSkippedStop,
+    )
+    .await
+}
+
 async fn handle(
     pool: MySqlPool,
     config: Arc<Config>,
@@ -75,17 +161,60 @@ async fn handle(
     let Some(parameters) = body.get("ReaxiumParameters") else {
         return response(3, "Invalid Json Header");
     };
-    let request = parameters
-        .get("DeviceTraffic")
-        .cloned()
-        .and_then(|v| serde_json::from_value::<BeginRoute>(v).ok());
+    let request = if matches!(
+        action,
+        Action::Notification(_)
+            | Action::NextStop
+            | Action::SkippedStop
+            | Action::ManualSkippedStop
+    ) {
+        parameters.get("Notification").cloned().and_then(|value| {
+            if action == Action::NextStop {
+                model::fixed_notification_request(value, 5)
+            } else if action == Action::SkippedStop {
+                model::fixed_notification_request(value, 18)
+            } else if action == Action::ManualSkippedStop {
+                model::manual_skipped_stop_request(value)
+            } else {
+                model::notification_request(value)
+            }
+        })
+    } else {
+        parameters
+            .get("DeviceTraffic")
+            .cloned()
+            .and_then(|v| serde_json::from_value::<BeginRoute>(v).ok())
+    };
     let Some(request) = request.filter(|r| {
-        r.valid() && (action == Action::Begin || r.traffic_situation_id.is_some_and(|id| id > 0))
+        r.valid()
+            && match action {
+                Action::Begin
+                | Action::Notification(_)
+                | Action::NextStop
+                | Action::SkippedStop
+                | Action::ManualSkippedStop => true,
+                Action::Send(_) => {
+                    r.traffic_type_id
+                        .is_some_and(|id| id > 0 && id <= i32::MAX as i64)
+                        && r.traffic_situation_id.is_none_or(|id| id > 0)
+                }
+                _ => r.traffic_situation_id.is_some_and(|id| id > 0),
+            }
     }) else {
         return response(
             3,
             "Invalid Parameters received, please checkout the api documentation",
         );
+    };
+    let action = match action {
+        Action::NextStop => Action::Notification(5),
+        Action::Send(_) => Action::Send(request.traffic_type_id.expect("validated traffic type")),
+        Action::Notification(_) => Action::Notification(
+            request
+                .traffic_type_id
+                .expect("validated notification type"),
+        ),
+        action => action,
     };
     let saved = match repository::store(&pool, &request, action).await {
         Ok(saved) => saved,
@@ -151,7 +280,7 @@ async fn handle(
     );
     if matches!(
         vision_status,
-        "sent" | "skipped_inactive_device" | "disabled"
+        "sent" | "skipped_inactive_device" | "skipped_unsupported_traffic" | "disabled"
     ) && matches!(
         broadcast_status,
         "sent" | "skipped_no_businesses" | "disabled"

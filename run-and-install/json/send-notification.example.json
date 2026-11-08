@@ -1,0 +1,16 @@
+{
+  "ReaxiumParameters": {
+    "Notification": {
+      "notification_type": 9,
+      "device_id": 935,
+      "stop_id": 1061,
+      "route_id": 107,
+      "driver_id": 19626,
+      "trace_id": "test-alarm-001",
+      "latitude": 27.1975,
+      "longitude": -80.2528,
+      "bus_info": "364",
+      "alert_message": "Traffic delay: approximately 15 minutes."
+    }
+  }
+}

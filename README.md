@@ -250,6 +250,164 @@ The ignored `begin_route` integration test requires a disposable MySQL database 
 DeviceStatus integration test. It uses local UDP/ZeroMQ receivers, verifies automatic
 trigger writes, rollback, TIMESTAMP serialization, and truthful partial-failure responses.
 
+## Send alarm notifications
+
+`POST /Alarm/sendNotification` and `/school_bus_cloud/Alarm/sendNotification`
+implement ReaxiumCloud's alarm traffic workflow. Use the same Basic authentication
+as the other driver API endpoints and `ReaxiumParameters.Notification` with required
+`notification_type`, `device_id`, `stop_id`, `route_id`, `driver_id`, `trace_id`,
+`latitude`, `longitude`, and `bus_info`. IDs and coordinates accept numeric strings;
+`bus_info` must identify a positive bus ID. See
+`run-and-install/json/send-notification.example.json`.
+
+The notification type becomes `traffic_type_id`. The server supplies current time
+in America/New_York and forces situation `1`, ignoring caller-supplied traffic date,
+type and situation fields. The event is saved to `device_traffic`, including the
+stop identity and the bus number from the latest route assignment (`assigned_bus`).
+If that assignment has no usable bus number, it falls back to the bus identified by
+`bus_info`;
+`bus_info` retains the reported bus ID. Types 9, 17 and 22 also create an `alerts`
+row linked by `device_traffic_id` when `alert_message` is nonempty (PHP also treats
+`"0"` as empty). Omitting the message records traffic without an alert row. The required integer
+`alerts.session_id` audit field is populated with the reporting `driver_id`, since
+device API requests authenticate with Basic credentials rather than a user session.
+
+The shared pipeline publishes enriched traffic to interested business WebSocket
+channels with the appropriate traffic label. Ordinary alarms skip Vision; route
+start/end/interruption types retain the shared activity and Vision behavior. Type
+14 here does not automatically drop passengers. No SMS, email or parent push is
+sent directly.
+
+Compared with PHP, this API retains the driver's Basic authentication, stricter
+input validation, atomic database writes and explicit downstream failure reporting.
+Success returns code `0` and an empty object array; code `3` with
+`object.database_saved: true` means the event was saved but delivery was incomplete.
+Do not resubmit that event. Requests are not deduplicated by trace ID.
+
+```bash
+curl -i -u "$REAXIUM_API_USER:$REAXIUM_API_PASSWORD" \
+  -H 'Content-Type: application/json' \
+  --data-binary @run-and-install/json/send-notification.example.json \
+  "$BASE_URL/Alarm/sendNotification"
+```
+
+## Send next-stop notifications
+
+`POST /Alarm/sendNextStopNotification` and
+`/school_bus_cloud/Alarm/sendNextStopNotification` accept the same Basic authentication
+and `ReaxiumParameters.Notification` fields as `sendNotification`. The
+`notification_type` field is required and non-null, but its value is ignored:
+this endpoint always saves traffic type **5**, situation **1**, and current server
+time in America/New_York. Supplied traffic type, situation and date are ignored.
+
+The shared notification pipeline saves `device_traffic`, resolves the route-assigned
+bus number with the `bus_info` fallback, and publishes `ROUTE_MINOR_TRAFFIC` to
+interested businesses. It does not create an `alerts` row, change device activity,
+or send Vision packets, even if an `alert_message` or another notification type
+is supplied. Delivery failures retain the existing `database_saved: true` response.
+
+```bash
+curl -i -u "$REAXIUM_API_USER:$REAXIUM_API_PASSWORD" \
+  -H 'Content-Type: application/json' \
+  --data-binary @run-and-install/json/send-next-stop-notification.example.json \
+  "$BASE_URL/Alarm/sendNextStopNotification"
+```
+
+## Send skipped-stop notifications
+
+`POST /Alarm/sendSkippedStopNotification` and
+`/school_bus_cloud/Alarm/sendSkippedStopNotification` use Basic authentication and
+`ReaxiumParameters.Notification`, with the same required fields as next-stop requests.
+`notification_type` is required and non-null but its value is ignored. Traffic type
+is always **18**, situation **1**, and event time is current server time in
+America/New_York. The service records a reported skipped stop; it does not detect
+or independently verify skipped stops.
+
+The event is saved in `device_traffic` and published as `ROUTE_MINOR_TRAFFIC` to
+interested business channels. No `alerts` record, device activity change, passenger
+drop-off or Vision packet is produced, even when an alert message is supplied.
+To match ReaxiumCloud, `assigned_bus` comes only from the latest route assignment;
+it does not use the `bus_info` fallback added to the other notification endpoints.
+The shared Rust API retains Basic authentication, stricter validation, transactional
+writes and explicit delivery failure reporting (`database_saved: true` after a saved
+event with incomplete publication). These operational behaviors differ from PHP.
+
+```bash
+curl -i -u "$REAXIUM_API_USER:$REAXIUM_API_PASSWORD" \
+  -H 'Content-Type: application/json' \
+  --data-binary @run-and-install/json/send-skipped-stop-notification.example.json \
+  "$BASE_URL/Alarm/sendSkippedStopNotification"
+```
+
+## Send manual skipped-stop notifications
+
+`POST /Alarm/sendManualSkippedStopNotification` and
+`/school_bus_cloud/Alarm/sendManualSkippedStopNotification` use Basic authentication
+and `ReaxiumParameters.Notification`. Required fields are `device_id`, `stop_id`,
+`route_id`, `driver_id`, `trace_id`, `traffic_date`, `latitude`, `longitude`, and
+`bus_info` (a bus ID). `notification_type` is not required and is ignored.
+
+The service forces traffic type **27** and situation **2**, preserves the supplied
+`traffic_date` (America/New_York wall time, `YYYY-MM-DD HH:mm:ss`; legacy `::`
+separators are accepted), and records the event in `device_traffic`. It resolves
+stop identity and `assigned_bus` from the latest route assignment, without a
+`bus_info` fallback, matching ReaxiumCloud. Publication uses `ALARM_TRAFFIC`.
+No separate alert, activity change, automatic passenger drop-off or Vision packet
+is produced. Shared Rust authentication, validation, transactions and delivery
+failure reporting remain in place. See
+`run-and-install/json/send-manual-skipped-stop-notification.example.json`.
+
+## Send device traffic
+
+`POST /DeviceTraffic/sendTraffic` and `/school_bus_cloud/DeviceTraffic/sendTraffic`
+use the route endpoints' Basic authentication and `ReaxiumParameters.DeviceTraffic`
+payload. `traffic_type_id` is required (positive integer or numeric string);
+`traffic_situation_id` defaults to `1`. Dates use `YYYY-MM-DD HH:mm:ss` and
+`bus_info` is a positive bus ID string. See `run-and-install/json/send-traffic.example.json`.
+
+Types 15/16 record stop arrival/departure without changing device activity or sending
+Vision packets. Type 3 creates activity and sends Vision event 401; types 4/14 clear
+device activity and send event 402. As in PHP, sending type 14 here does not perform
+`interruptARoute`'s automatic passenger drop-offs. Other types leave activity unchanged
+and skip Vision. Dashboard labels follow PHP's major/minor/access/alarm groups.
+
+A nonempty `alert_message` for types 9, 17 or 22 inserts the corresponding delay alert
+in `alerts`, with the traffic ID, route, bus, trace and event date. Traffic, activity
+and alert writes share one transaction. Downstream failures report `database_saved: true`;
+do not resubmit saved events.
+
+```bash
+./run-and-install/test-api.sh --send-traffic run-and-install/json/send-traffic.example.json
+```
+
+Update the example IDs, trace and date before testing. Rebuild the API image after
+source changes: `docker compose up -d --build --no-deps api`.
+
+## Interrupt a route
+
+`POST /DeviceTraffic/interruptARoute` and
+`/school_bus_cloud/DeviceTraffic/interruptARoute` use the same Basic authentication
+and payload validation as `endARoute`. Use a positive bus ID string for `bus_info`
+and `YYYY-MM-DD HH:mm:ss` for `traffic_date` (legacy double colons also work).
+`traffic_situation_id` is required.
+
+The endpoint inserts device traffic type **14**, clears all activity for the device,
+and automatically inserts passenger drop-offs (type **2**, situation **20**) for
+boardings in the trace without a later drop-off. It preserves passenger boarding
+metadata and uses the supplied stop/coordinates and server time in America/New_York,
+matching ReaxiumCloud. Optional passenger snapshots (`stop_number`, `stop_name`,
+`session_uid`, `assigned_bus`) are copied only when present in the `traffic` schema;
+older schemas require no migration. MySQL timezone tables must include America/New_York.
+These database changes and transactional triggers commit or roll back together.
+After commit it sends Vision event **402** and the dashboard route event. Downstream
+failure uses the existing `database_saved: true` response; do not resubmit saved events.
+
+Replace the example IDs, trace and date with test data before running:
+
+```bash
+./run-and-install/test-api.sh --interrupt-route run-and-install/json/interrupt-route.example.json
+```
+
 ## End a route
 
 `POST /DeviceTraffic/endARoute` and `/school_bus_cloud/DeviceTraffic/endARoute`

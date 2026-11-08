@@ -413,10 +413,110 @@ async fn saves_broadcasts_sends_udp_and_reports_rollback_and_partial_failure() {
             .await
             .unwrap();
     assert_eq!(remaining, 0);
+
+    // Interruptions preserve boarded metadata and leave already dropped-off
+    // passengers and other traces untouched.
+    sqlx::raw_sql(include_str!("fixtures/interrupt_route.sql"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let mut input = sample();
+    input["ReaxiumParameters"]["DeviceTraffic"]["trace_id"] = json!("interrupt-test");
+    input["ReaxiumParameters"]["DeviceTraffic"]["traffic_situation_id"] = json!("2");
+    for path in [
+        "/DeviceTraffic/interruptARoute",
+        "/school_bus_cloud/DeviceTraffic/interruptARoute",
+    ] {
+        let result = post(disabled.clone(), path, input.clone(), Some("test-password")).await;
+        assert_eq!(result["ReaxiumResponse"]["code"], 0, "{result}");
+    }
+    let rows = sqlx::query("SELECT * FROM traffic WHERE access_situation_id=20")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    let dropoff = &rows[0];
+    assert_eq!(dropoff.get::<i64, _>("user_id"), 10);
+    assert_eq!(dropoff.get::<i64, _>("access_id"), 100);
+    assert_eq!(dropoff.get::<i64, _>("id_stop"), 9);
+    assert_eq!(dropoff.get::<i64, _>("id_stop_by_distance"), 9);
+    assert_eq!(dropoff.get::<String, _>("stop_number"), "STOP9");
+    assert_eq!(dropoff.get::<String, _>("session_uid"), "session-10");
+    assert_eq!(dropoff.get::<String, _>("assigned_bus"), "ORIGINAL-BUS");
+    assert_eq!(
+        dropoff.get::<f64, _>("latitude"),
+        input["ReaxiumParameters"]["DeviceTraffic"]["latitude"]
+            .as_f64()
+            .unwrap()
+    );
+    assert!(dropoff
+        .get::<Option<chrono::NaiveDateTime>, _>("datetime")
+        .is_some());
+    let types: Vec<i32> = sqlx::query_scalar(
+        "SELECT traffic_type_id FROM device_traffic WHERE trace_id='interrupt-test'",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(types, vec![14, 14]);
+    let activities: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM device_activity WHERE device_id=42")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(activities, 0);
+
+    // A failing passenger insert rolls back the route event, trigger writes,
+    // and device activity deletion as well.
+    sqlx::raw_sql("INSERT INTO device_activity (device_id,route_id) VALUES (42,7); DELETE FROM traffic WHERE access_situation_id=20; CREATE TRIGGER reject_dropoff BEFORE INSERT ON traffic FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='test dropoff failure';")
+        .execute(&pool).await.unwrap();
+    let before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM route_trigger_audit")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let result = post(
+        disabled.clone(),
+        "/DeviceTraffic/interruptARoute",
+        input.clone(),
+        Some("test-password"),
+    )
+    .await;
+    assert_eq!(result["ReaxiumResponse"]["code"], 3);
+    let after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM route_trigger_audit")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(before, after);
+    let activities: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM device_activity WHERE device_id=42")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(activities, 1);
+    sqlx::raw_sql("DROP TRIGGER reject_dropoff")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Older traffic schemas may omit any of the denormalized snapshots.
+    // Exercise a missing stop_number alone, then all optional metadata absent.
+    for alteration in [
+        "ALTER TABLE traffic DROP COLUMN stop_number",
+        "ALTER TABLE traffic DROP COLUMN stop_name, DROP COLUMN session_uid, DROP COLUMN assigned_bus",
+    ] {
+        sqlx::raw_sql(alteration).execute(&pool).await.unwrap();
+        sqlx::query("DELETE FROM traffic WHERE access_situation_id=20").execute(&pool).await.unwrap();
+        let result = post(disabled.clone(), "/DeviceTraffic/interruptARoute", input.clone(), Some("test-password")).await;
+        assert_eq!(result["ReaxiumResponse"]["code"], 0, "{result}");
+        let passengers: Vec<i64> = sqlx::query_scalar("SELECT user_id FROM traffic WHERE access_situation_id=20")
+            .fetch_all(&pool).await.unwrap();
+        assert_eq!(passengers, vec![10]);
+    }
+    check_send_traffic(&pool, disabled).await;
 }
 
 #[tokio::test]
-async fn end_route_requires_authentication_and_situation_on_both_paths() {
+async fn finishing_routes_require_authentication_and_situation_on_both_paths() {
     let pool = MySqlPoolOptions::new()
         .connect_lazy("mysql://unused:unused@127.0.0.1:1/unused")
         .unwrap();
@@ -424,6 +524,8 @@ async fn end_route_requires_authentication_and_situation_on_both_paths() {
     for path in [
         "/DeviceTraffic/endARoute",
         "/school_bus_cloud/DeviceTraffic/endARoute",
+        "/DeviceTraffic/interruptARoute",
+        "/school_bus_cloud/DeviceTraffic/interruptARoute",
     ] {
         let result = post(app.clone(), path, sample(), None).await;
         assert_eq!(
@@ -460,5 +562,572 @@ fn bus_info_requires_a_positive_bus_id_not_a_number_or_mysql_coercible_prefix() 
         let mut input = sample()["ReaxiumParameters"]["DeviceTraffic"].clone();
         input["bus_info"] = json!(id);
         assert!(!serde_json::from_value::<BeginRoute>(input).unwrap().valid());
+    }
+}
+
+#[tokio::test]
+async fn send_traffic_authenticates_and_validates_types_on_both_paths() {
+    let pool = MySqlPoolOptions::new()
+        .connect_lazy("mysql://unused:unused@127.0.0.1:1/unused")
+        .unwrap();
+    let app = make_app(pool, "tcp://127.0.0.1:1", None);
+    for path in [
+        "/DeviceTraffic/sendTraffic",
+        "/school_bus_cloud/DeviceTraffic/sendTraffic",
+    ] {
+        assert_eq!(
+            post(app.clone(), path, sample(), None).await["ReaxiumResponse"]["message"],
+            "Invalid Authentication"
+        );
+        for value in [
+            Value::Null,
+            json!(0),
+            json!(-1),
+            json!("bad"),
+            json!(1.5),
+            json!(2147483648_i64),
+        ] {
+            let mut input = sample();
+            if !value.is_null() {
+                input["ReaxiumParameters"]["DeviceTraffic"]["traffic_type_id"] = value;
+            }
+            let response = post(app.clone(), path, input, Some("test-password")).await;
+            assert!(response["ReaxiumResponse"]["message"]
+                .as_str()
+                .unwrap()
+                .starts_with("Invalid Parameters"));
+        }
+        let mut input = sample();
+        input["ReaxiumParameters"]["DeviceTraffic"]["traffic_type_id"] = json!(15);
+        input["ReaxiumParameters"]["DeviceTraffic"]["traffic_situation_id"] = json!(0);
+        assert!(
+            post(app.clone(), path, input, Some("test-password")).await["ReaxiumResponse"]
+                ["message"]
+                .as_str()
+                .unwrap()
+                .starts_with("Invalid Parameters")
+        );
+    }
+}
+
+async fn check_send_traffic(pool: &MySqlPool, disabled: Router) {
+    sqlx::raw_sql("DROP TABLE IF EXISTS alerts; CREATE TABLE alerts (alert_name VARCHAR(100), alert_message TEXT, trace_id VARCHAR(100), traffic_type_id BIGINT, alert_date DATETIME, bus_id BIGINT, id_route BIGINT, device_traffic_id BIGINT UNSIGNED, session_id INT NOT NULL) ENGINE=InnoDB; DELETE FROM device_activity WHERE device_id=42;")
+        .execute(pool).await.unwrap();
+    let passenger_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM traffic")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    for (id, expected_activity) in [
+        (3, 1),
+        (15, 1),
+        (16, 1),
+        (9, 1),
+        (17, 1),
+        (22, 1),
+        (4, 0),
+        (3, 1),
+        (14, 0),
+    ] {
+        let mut input = sample();
+        input["ReaxiumParameters"]["DeviceTraffic"]["traffic_type_id"] = json!(id.to_string());
+        input["ReaxiumParameters"]["DeviceTraffic"]["alert_message"] = json!("Test delay");
+        let result = post(
+            disabled.clone(),
+            "/DeviceTraffic/sendTraffic",
+            input,
+            Some("test-password"),
+        )
+        .await;
+        assert_eq!(result["ReaxiumResponse"]["code"], 0, "{result}");
+        let row = sqlx::query("SELECT traffic_type_id,traffic_situation_id FROM device_traffic ORDER BY device_traffic_id DESC LIMIT 1").fetch_one(pool).await.unwrap();
+        assert_eq!(row.get::<i32, _>("traffic_type_id"), id);
+        assert_eq!(row.get::<i32, _>("traffic_situation_id"), 1);
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM device_activity WHERE device_id=42")
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        assert_eq!(count, expected_activity);
+    }
+    let after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM traffic")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        after, passenger_count,
+        "sendTraffic type 14 must not auto-drop passengers"
+    );
+    let names: Vec<String> =
+        sqlx::query_scalar("SELECT alert_name FROM alerts ORDER BY traffic_type_id")
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        names,
+        vec!["TRAFFIC DELAY ALERT", "STOP DELAY", "LATE ATTENDANT ALERT"]
+    );
+
+    // Stop events publish minor traffic and succeed without a Vision destination.
+    sqlx::query("INSERT INTO traffic_type VALUES (15,'STOP ARRIVE')")
+        .execute(pool)
+        .await
+        .unwrap();
+    let mut zmq = zeromq::PullSocket::new();
+    let endpoint = zmq.bind("tcp://127.0.0.1:0").await.unwrap().to_string();
+    let app = make_app(pool.clone(), &endpoint, None);
+    let mut input = sample();
+    input["ReaxiumParameters"]["DeviceTraffic"]["traffic_type_id"] = json!(15);
+    input["ReaxiumParameters"]["DeviceTraffic"]["traffic_situation_id"] = json!(2);
+    let result = post(
+        app,
+        "/school_bus_cloud/DeviceTraffic/sendTraffic",
+        input.clone(),
+        Some("test-password"),
+    )
+    .await;
+    assert_eq!(result["ReaxiumResponse"]["code"], 0, "{result}");
+    let message = tokio::time::timeout(Duration::from_secs(2), zmq.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(message
+        .iter()
+        .any(|frame| String::from_utf8_lossy(frame).contains("ROUTE_MINOR_TRAFFIC")));
+    let situation: i32 = sqlx::query_scalar(
+        "SELECT traffic_situation_id FROM device_traffic ORDER BY device_traffic_id DESC LIMIT 1",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(situation, 2);
+
+    sqlx::raw_sql("CREATE TRIGGER reject_alert BEFORE INSERT ON alerts FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='test alert failure'").execute(pool).await.unwrap();
+    let before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM device_traffic")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    input["ReaxiumParameters"]["DeviceTraffic"]["traffic_type_id"] = json!(9);
+    input["ReaxiumParameters"]["DeviceTraffic"]["alert_message"] = json!("Test delay");
+    assert_eq!(
+        post(
+            disabled,
+            "/DeviceTraffic/sendTraffic",
+            input,
+            Some("test-password")
+        )
+        .await["ReaxiumResponse"]["code"],
+        3
+    );
+    let after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM device_traffic")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(before, after);
+    sqlx::raw_sql("DROP TRIGGER reject_alert")
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+fn notification_sample() -> Value {
+    let mut request = sample()["ReaxiumParameters"]["DeviceTraffic"].clone();
+    request.as_object_mut().unwrap().remove("traffic_date");
+    request["notification_type"] = json!(9);
+    json!({"ReaxiumParameters": {"Notification": request}})
+}
+
+#[tokio::test]
+async fn notifications_require_authentication_and_validate_the_notification_namespace() {
+    let pool = MySqlPoolOptions::new()
+        .connect_lazy("mysql://unused:unused@127.0.0.1:1/unused")
+        .unwrap();
+    let app = make_app(pool, "tcp://127.0.0.1:1", None);
+    for path in [
+        "/Alarm/sendNotification",
+        "/school_bus_cloud/Alarm/sendNotification",
+    ] {
+        assert_eq!(
+            post(app.clone(), path, notification_sample(), None).await["ReaxiumResponse"]
+                ["message"],
+            "Invalid Authentication"
+        );
+        assert!(
+            post(app.clone(), path, sample(), Some("test-password")).await["ReaxiumResponse"]
+                ["message"]
+                .as_str()
+                .unwrap()
+                .starts_with("Invalid Parameters")
+        );
+        for invalid in [
+            Value::Null,
+            json!(0),
+            json!(-1),
+            json!(1.5),
+            json!("bad"),
+            json!(2147483648_i64),
+        ] {
+            let mut input = notification_sample();
+            input["ReaxiumParameters"]["Notification"]["notification_type"] = invalid;
+            assert!(
+                post(app.clone(), path, input, Some("test-password")).await["ReaxiumResponse"]
+                    ["message"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("Invalid Parameters")
+            );
+        }
+    }
+}
+
+async fn check_notifications(pool: &MySqlPool, disabled: Router) {
+    sqlx::query("INSERT INTO bus_routes_relationship VALUES (1,7,'2026-01-01 00:00:00')")
+        .execute(pool)
+        .await
+        .unwrap();
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM alerts")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    let mut expected = count;
+    for (id, message, creates_alert) in [
+        (9, Some("Traffic delay"), true),
+        (9, None, false),
+        (17, Some("Stop delay"), true),
+        (22, Some("Attendant late"), true),
+        (8, Some("Emergency"), false),
+        (9, Some(""), false),
+        (9, Some("0"), false),
+    ] {
+        let mut input = notification_sample();
+        let r = &mut input["ReaxiumParameters"]["Notification"];
+        r["notification_type"] = json!(id.to_string());
+        r["traffic_date"] = json!("2000-01-01 00:00:00");
+        r["traffic_situation_id"] = json!(2);
+        r["traffic_type_id"] = json!(3);
+        if let Some(message) = message {
+            r["alert_message"] = json!(message);
+        }
+        let before = chrono::Utc::now()
+            .with_timezone(&chrono_tz::America::New_York)
+            .naive_local()
+            - chrono::Duration::seconds(1);
+        let result = post(
+            disabled.clone(),
+            "/school_bus_cloud/Alarm/sendNotification",
+            input,
+            Some("test-password"),
+        )
+        .await;
+        assert_eq!(result["ReaxiumResponse"]["code"], 0, "{result}");
+        let row =
+            sqlx::query("SELECT *,CAST(traffic_date AS CHAR) AS event_date FROM device_traffic ORDER BY device_traffic_id DESC LIMIT 1")
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        assert_eq!(row.get::<i32, _>("traffic_type_id"), id);
+        assert_eq!(row.get::<i32, _>("traffic_situation_id"), 1);
+        assert_eq!(row.get::<String, _>("assigned_bus"), "ROUTE-BUS");
+        assert_eq!(row.get::<String, _>("bus_info"), "2");
+        assert!(
+            chrono::NaiveDateTime::parse_from_str(
+                &row.get::<String, _>("event_date"),
+                "%Y-%m-%d %H:%M:%S"
+            )
+            .unwrap()
+                >= before
+        );
+        if creates_alert {
+            expected += 1;
+            let linked: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM alerts WHERE device_traffic_id=? AND bus_id=2 AND id_route=7 AND session_id=1",
+            )
+            .bind(row.get::<u64, _>("device_traffic_id"))
+            .fetch_one(pool)
+            .await
+            .unwrap();
+            assert_eq!(linked, 1);
+        }
+        let actual: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM alerts")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+        assert_eq!(actual, expected);
+    }
+    // Missing, dangling and blank route assignments fall back to the reported bus.
+    for setup in [
+        "DELETE FROM bus_routes_relationship WHERE id_route=7",
+        "INSERT INTO bus_routes_relationship VALUES (999,7,'2026-01-01 00:00:00')",
+        "DELETE FROM bus_routes_relationship WHERE id_route=7; UPDATE bus SET bus_number='' WHERE bus_id=1; INSERT INTO bus_routes_relationship VALUES (1,7,'2026-01-01 00:00:00')",
+    ] {
+        sqlx::raw_sql(setup).execute(pool).await.unwrap();
+        let result = post(disabled.clone(), "/Alarm/sendNotification", notification_sample(), Some("test-password")).await;
+        assert_eq!(result["ReaxiumResponse"]["code"], 0, "{result}");
+        let assigned: String = sqlx::query_scalar("SELECT assigned_bus FROM device_traffic ORDER BY device_traffic_id DESC LIMIT 1").fetch_one(pool).await.unwrap();
+        assert_eq!(assigned, "REQUEST-BUS");
+    }
+    // Alarm publication uses the same enriched event and business channels.
+    sqlx::query("INSERT INTO traffic_type VALUES (9,'TRAFFIC DELAY')")
+        .execute(pool)
+        .await
+        .unwrap();
+    let mut receiver = zeromq::PullSocket::new();
+    let endpoint = receiver
+        .bind("tcp://127.0.0.1:0")
+        .await
+        .unwrap()
+        .to_string();
+    let app = make_app(pool.clone(), &endpoint, None);
+    let result = post(
+        app,
+        "/Alarm/sendNotification",
+        notification_sample(),
+        Some("test-password"),
+    )
+    .await;
+    assert_eq!(result["ReaxiumResponse"]["code"], 0, "{result}");
+    let message = tokio::time::timeout(Duration::from_secs(2), receiver.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let value: Value = serde_json::from_str(&String::try_from(message).unwrap()).unwrap();
+    assert_eq!(value["content"]["traffic_label"], "ALARM_TRAFFIC");
+    assert_eq!(value["content"]["typeTrafficId"], 9);
+    sqlx::query("INSERT INTO traffic_type VALUES (5,'BUS ARRIVING'),(18,'SKIPPED STOP'),(27,'MANUAL SKIPPED STOP')")
+        .execute(pool)
+        .await
+        .unwrap();
+    let alerts_before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM alerts")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    let activity_before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM device_activity")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    for (path, traffic_type) in [
+        ("/Alarm/sendNextStopNotification", 5),
+        ("/school_bus_cloud/Alarm/sendNextStopNotification", 5),
+        ("/Alarm/sendSkippedStopNotification", 18),
+        ("/school_bus_cloud/Alarm/sendSkippedStopNotification", 18),
+        ("/Alarm/sendManualSkippedStopNotification", 27),
+        (
+            "/school_bus_cloud/Alarm/sendManualSkippedStopNotification",
+            27,
+        ),
+    ] {
+        if matches!(traffic_type, 18 | 27) {
+            sqlx::query("UPDATE bus SET bus_number='ROUTE-BUS' WHERE bus_id=1")
+                .execute(pool)
+                .await
+                .unwrap();
+        }
+        let mut receiver = zeromq::PullSocket::new();
+        let endpoint = receiver
+            .bind("tcp://127.0.0.1:0")
+            .await
+            .unwrap()
+            .to_string();
+        let app = make_app(pool.clone(), &endpoint, None);
+        let mut input = notification_sample();
+        let r = &mut input["ReaxiumParameters"]["Notification"];
+        r["notification_type"] = json!(9);
+        r["traffic_type_id"] = json!(3);
+        r["traffic_situation_id"] = json!(2);
+        r["traffic_date"] = json!("2000-01-01 00:00:00");
+        r["alert_message"] = json!("Must not create an alert");
+        if traffic_type == 27 {
+            r.as_object_mut().unwrap().remove("notification_type");
+            r["traffic_situation_id"] = json!(1);
+            r["traffic_date"] = json!("2026-11-08 08::30::00");
+        }
+        let before = chrono::Utc::now()
+            .with_timezone(&chrono_tz::America::New_York)
+            .naive_local()
+            - chrono::Duration::seconds(1);
+        let result = post(app, path, input, Some("test-password")).await;
+        assert_eq!(result["ReaxiumResponse"]["code"], 0, "{result}");
+        let row = sqlx::query("SELECT traffic_type_id,traffic_situation_id,CAST(traffic_date AS CHAR) AS event_date,assigned_bus FROM device_traffic ORDER BY device_traffic_id DESC LIMIT 1").fetch_one(pool).await.unwrap();
+        assert_eq!(row.get::<i32, _>("traffic_type_id"), traffic_type);
+        assert_eq!(
+            row.get::<i32, _>("traffic_situation_id"),
+            if traffic_type == 27 { 2 } else { 1 }
+        );
+        assert_eq!(
+            row.get::<String, _>("assigned_bus"),
+            if matches!(traffic_type, 18 | 27) {
+                "ROUTE-BUS"
+            } else {
+                "REQUEST-BUS"
+            }
+        );
+        if traffic_type == 27 {
+            assert_eq!(row.get::<String, _>("event_date"), "2026-11-08 08:30:00");
+        } else {
+            assert!(
+                chrono::NaiveDateTime::parse_from_str(
+                    &row.get::<String, _>("event_date"),
+                    "%Y-%m-%d %H:%M:%S"
+                )
+                .unwrap()
+                    >= before
+            );
+        }
+        let message = tokio::time::timeout(Duration::from_secs(2), receiver.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let value: Value = serde_json::from_str(&String::try_from(message).unwrap()).unwrap();
+        assert_eq!(
+            value["content"]["traffic_label"],
+            if traffic_type == 27 {
+                "ALARM_TRAFFIC"
+            } else {
+                "ROUTE_MINOR_TRAFFIC"
+            }
+        );
+        assert_eq!(value["content"]["typeTrafficId"], traffic_type);
+    }
+    let alerts_after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM alerts")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    let activity_after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM device_activity")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(alerts_after, alerts_before);
+    assert_eq!(activity_after, activity_before);
+    // PHP skipped-stop behavior keeps assigned_bus NULL when no route assignment exists.
+    sqlx::query("DELETE FROM bus_routes_relationship WHERE id_route=7")
+        .execute(pool)
+        .await
+        .unwrap();
+    let result = post(
+        disabled,
+        "/Alarm/sendSkippedStopNotification",
+        notification_sample(),
+        Some("test-password"),
+    )
+    .await;
+    assert_eq!(result["ReaxiumResponse"]["code"], 0, "{result}");
+    let assigned: Option<String> = sqlx::query_scalar(
+        "SELECT assigned_bus FROM device_traffic ORDER BY device_traffic_id DESC LIMIT 1",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(assigned, None);
+}
+
+#[tokio::test]
+#[ignore = "requires disposable TEST_DATABASE_URL named device_api_migration_test"]
+async fn alarm_notifications_save_optional_alerts_and_broadcast() {
+    let pool = MySqlPoolOptions::new()
+        .max_connections(5)
+        .connect(&std::env::var("TEST_DATABASE_URL").unwrap())
+        .await
+        .unwrap();
+    let database: String = sqlx::query_scalar("SELECT DATABASE()")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        database, "device_api_migration_test",
+        "refusing to change a non-test database"
+    );
+    sqlx::raw_sql(include_str!("fixtures/device_status.sql"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::raw_sql(include_str!("fixtures/begin_route.sql"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::raw_sql("DROP TABLE IF EXISTS alerts; CREATE TABLE alerts (alert_name VARCHAR(100), alert_message TEXT, trace_id VARCHAR(100), traffic_type_id BIGINT, alert_date DATETIME, bus_id BIGINT, id_route BIGINT, device_traffic_id BIGINT UNSIGNED, session_id INT NOT NULL) ENGINE=InnoDB;")
+        .execute(&pool).await.unwrap();
+    let disabled = router(Metrics::new().unwrap())
+        .layer(Extension(pool.clone()))
+        .layer(Extension(Arc::new(Config {
+            username: "test".into(),
+            password: "test-password".into(),
+            previous_password: String::new(),
+            broadcast_enabled: false,
+            broadcast_endpoint: "tcp://127.0.0.1:1".into(),
+            broadcast_timeout: Duration::from_millis(300),
+        })))
+        .layer(Extension(Arc::new(VisionConfig {
+            enabled: false,
+            destination: None,
+            timezone: chrono_tz::America::New_York,
+        })));
+    check_notifications(&pool, disabled).await;
+}
+
+#[tokio::test]
+async fn next_stop_notifications_require_authentication_and_notification_type() {
+    let pool = MySqlPoolOptions::new()
+        .connect_lazy("mysql://unused:unused@127.0.0.1:1/unused")
+        .unwrap();
+    let app = make_app(pool, "tcp://127.0.0.1:1", None);
+    for path in [
+        "/Alarm/sendNextStopNotification",
+        "/school_bus_cloud/Alarm/sendNextStopNotification",
+        "/Alarm/sendSkippedStopNotification",
+        "/school_bus_cloud/Alarm/sendSkippedStopNotification",
+    ] {
+        assert_eq!(
+            post(app.clone(), path, notification_sample(), None).await["ReaxiumResponse"]
+                ["message"],
+            "Invalid Authentication"
+        );
+        for missing in [true, false] {
+            let mut input = notification_sample();
+            let r = &mut input["ReaxiumParameters"]["Notification"];
+            if missing {
+                r.as_object_mut().unwrap().remove("notification_type");
+            } else {
+                r["notification_type"] = Value::Null;
+            }
+            assert!(
+                post(app.clone(), path, input, Some("test-password")).await["ReaxiumResponse"]
+                    ["message"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("Invalid Parameters")
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn manual_skipped_stop_requires_authentication_and_valid_event_date() {
+    let pool = MySqlPoolOptions::new()
+        .connect_lazy("mysql://unused:unused@127.0.0.1:1/unused")
+        .unwrap();
+    let app = make_app(pool, "tcp://127.0.0.1:1", None);
+    for path in [
+        "/Alarm/sendManualSkippedStopNotification",
+        "/school_bus_cloud/Alarm/sendManualSkippedStopNotification",
+    ] {
+        assert_eq!(
+            post(app.clone(), path, notification_sample(), None).await["ReaxiumResponse"]
+                ["message"],
+            "Invalid Authentication"
+        );
+        for date in [Value::Null, json!("bad-date"), json!("2026-02-30 08:30:00")] {
+            let mut input = notification_sample();
+            let r = &mut input["ReaxiumParameters"]["Notification"];
+            r.as_object_mut().unwrap().remove("notification_type");
+            if !date.is_null() {
+                r["traffic_date"] = date;
+            }
+            assert!(
+                post(app.clone(), path, input, Some("test-password")).await["ReaxiumResponse"]
+                    ["message"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("Invalid Parameters")
+            );
+        }
     }
 }
