@@ -50,8 +50,8 @@ impl Config {
             username: first(&["REAXIUM_API_USER", "REAXIUM_API_BASIC_AUTH_USERNAME"]),
             password: first(&["REAXIUM_API_PASSWORD", "REAXIUM_API_BASIC_AUTH_PASSWORD"]),
             previous_password: first(&["REAXIUM_API_PASSWORD_PREVIOUS"]),
-            broadcast_endpoint: env::var("DEVICE_STATUS_ZMQ_ENDPOINT")
-                .unwrap_or_else(|_| "tcp://127.0.0.1:5555".into()),
+            broadcast_endpoint: env::var("DEVICES_API_EXPORT_DEVICE_STATUS_URL")
+                .unwrap_or_default(),
             broadcast_timeout: Duration::from_secs(timeout),
         })
     }

@@ -266,12 +266,7 @@ async fn process(
     } else {
         match tokio::time::timeout(
             config.broadcast_timeout,
-            broadcast::dispatch(
-                &pool,
-                &config.broadcast_endpoint,
-                request.device_id,
-                saved.traffic_id,
-            ),
+            broadcast::dispatch(&pool, &config, request.device_id, saved.traffic_id),
         )
         .await
         {

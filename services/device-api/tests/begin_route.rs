@@ -11,7 +11,8 @@ use serde_json::{json, Value};
 use sqlx::{mysql::MySqlPoolOptions, MySqlPool, Row};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tower::ServiceExt;
-use zeromq::{Socket, SocketRecv};
+#[path = "support/http_dispatcher.rs"]
+mod http_dispatcher;
 
 fn sample() -> Value {
     let mut value: Value = serde_json::from_str(include_str!(
@@ -63,7 +64,7 @@ async fn both_paths_authenticate_and_reject_bad_input_without_database_access() 
     let pool = MySqlPoolOptions::new()
         .connect_lazy("mysql://unused:unused@127.0.0.1:1/unused")
         .unwrap();
-    let app = make_app(pool, "tcp://127.0.0.1:1", None);
+    let app = make_app(pool, "http://127.0.0.1:1", None);
     for path in [
         "/DeviceTraffic/beginARoute",
         "/school_bus_cloud/DeviceTraffic/beginARoute",
@@ -121,8 +122,12 @@ async fn saves_broadcasts_sends_udp_and_reports_rollback_and_partial_failure() {
         .execute(&pool)
         .await
         .unwrap();
-    let mut zmq = zeromq::PullSocket::new();
-    let endpoint = zmq.bind("tcp://127.0.0.1:0").await.unwrap().to_string();
+    let mut dispatcher = http_dispatcher::Receiver::new();
+    let endpoint = dispatcher
+        .bind("http://127.0.0.1:0")
+        .await
+        .unwrap()
+        .to_string();
     let udp = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let unconfigured = make_app(pool.clone(), &endpoint, None);
     let app = make_app(pool.clone(), &endpoint, Some(udp.local_addr().unwrap()));
@@ -155,11 +160,11 @@ async fn saves_broadcasts_sends_udp_and_reports_rollback_and_partial_failure() {
     assert_eq!(activity.get::<i64, _>("route_id"), 7);
     assert_eq!(activity.get::<Option<String>, _>("users_in_track"), None);
     for _ in 0..2 {
-        let message = tokio::time::timeout(Duration::from_secs(2), zmq.recv())
+        let message = tokio::time::timeout(Duration::from_secs(2), dispatcher.recv())
             .await
             .unwrap()
             .unwrap();
-        let value: Value = serde_json::from_str(&String::try_from(message).unwrap()).unwrap();
+        let value: Value = serde_json::from_str(&message).unwrap();
         assert_eq!(value["content"]["traffic_label"], "ROUTE_MAJOR_TRAFFIC");
         assert_eq!(value["content"]["typeTrafficId"], 3);
         assert_eq!(value["content"]["traffic_date"], "2026-10-21 08:00:00");
@@ -267,9 +272,9 @@ async fn saves_broadcasts_sends_udp_and_reports_rollback_and_partial_failure() {
         .unwrap();
     let mut end = sample();
     end["ReaxiumParameters"]["DeviceTraffic"]["traffic_situation_id"] = json!("2");
-    let mut end_receiver = zeromq::PullSocket::new();
+    let mut end_receiver = http_dispatcher::Receiver::new();
     let end_endpoint = end_receiver
-        .bind("tcp://127.0.0.1:0")
+        .bind("http://127.0.0.1:0")
         .await
         .unwrap()
         .to_string();
@@ -356,14 +361,14 @@ async fn saves_broadcasts_sends_udp_and_reports_rollback_and_partial_failure() {
             .await
             .unwrap()
             .unwrap();
-        let value: Value = serde_json::from_str(&String::try_from(msg).unwrap()).unwrap();
+        let value: Value = serde_json::from_str(&msg).unwrap();
         assert_eq!(value["content"]["typeTrafficId"], 4);
         assert_eq!(value["content"]["traffic_label"], "ROUTE_MAJOR_TRAFFIC");
     }
     // Ending with no activity is allowed; unavailable dashboards still report saved data.
     let timeout_app = make_app(
         pool.clone(),
-        "tcp://127.0.0.1:1",
+        "http://127.0.0.1:1",
         Some(end_udp.local_addr().unwrap()),
     );
     let result = post(
@@ -393,7 +398,7 @@ async fn saves_broadcasts_sends_udp_and_reports_rollback_and_partial_failure() {
             password: "test-password".into(),
             previous_password: String::new(),
             broadcast_enabled: false,
-            broadcast_endpoint: "tcp://127.0.0.1:1".into(),
+            broadcast_endpoint: "http://127.0.0.1:1".into(),
             broadcast_timeout: Duration::from_millis(300),
         })))
         .layer(Extension(Arc::new(VisionConfig {
@@ -520,7 +525,7 @@ async fn finishing_routes_require_authentication_and_situation_on_both_paths() {
     let pool = MySqlPoolOptions::new()
         .connect_lazy("mysql://unused:unused@127.0.0.1:1/unused")
         .unwrap();
-    let app = make_app(pool, "tcp://127.0.0.1:1", None);
+    let app = make_app(pool, "http://127.0.0.1:1", None);
     for path in [
         "/DeviceTraffic/endARoute",
         "/school_bus_cloud/DeviceTraffic/endARoute",
@@ -570,7 +575,7 @@ async fn send_traffic_authenticates_and_validates_types_on_both_paths() {
     let pool = MySqlPoolOptions::new()
         .connect_lazy("mysql://unused:unused@127.0.0.1:1/unused")
         .unwrap();
-    let app = make_app(pool, "tcp://127.0.0.1:1", None);
+    let app = make_app(pool, "http://127.0.0.1:1", None);
     for path in [
         "/DeviceTraffic/sendTraffic",
         "/school_bus_cloud/DeviceTraffic/sendTraffic",
@@ -672,8 +677,12 @@ async fn check_send_traffic(pool: &MySqlPool, disabled: Router) {
         .execute(pool)
         .await
         .unwrap();
-    let mut zmq = zeromq::PullSocket::new();
-    let endpoint = zmq.bind("tcp://127.0.0.1:0").await.unwrap().to_string();
+    let mut dispatcher = http_dispatcher::Receiver::new();
+    let endpoint = dispatcher
+        .bind("http://127.0.0.1:0")
+        .await
+        .unwrap()
+        .to_string();
     let app = make_app(pool.clone(), &endpoint, None);
     let mut input = sample();
     input["ReaxiumParameters"]["DeviceTraffic"]["traffic_type_id"] = json!(15);
@@ -686,13 +695,11 @@ async fn check_send_traffic(pool: &MySqlPool, disabled: Router) {
     )
     .await;
     assert_eq!(result["ReaxiumResponse"]["code"], 0, "{result}");
-    let message = tokio::time::timeout(Duration::from_secs(2), zmq.recv())
+    let message = tokio::time::timeout(Duration::from_secs(2), dispatcher.recv())
         .await
         .unwrap()
         .unwrap();
-    assert!(message
-        .iter()
-        .any(|frame| String::from_utf8_lossy(frame).contains("ROUTE_MINOR_TRAFFIC")));
+    assert!(message.contains("ROUTE_MINOR_TRAFFIC"));
     let situation: i32 = sqlx::query_scalar(
         "SELECT traffic_situation_id FROM device_traffic ORDER BY device_traffic_id DESC LIMIT 1",
     )
@@ -741,7 +748,7 @@ async fn notifications_require_authentication_and_validate_the_notification_name
     let pool = MySqlPoolOptions::new()
         .connect_lazy("mysql://unused:unused@127.0.0.1:1/unused")
         .unwrap();
-    let app = make_app(pool, "tcp://127.0.0.1:1", None);
+    let app = make_app(pool, "http://127.0.0.1:1", None);
     for path in [
         "/Alarm/sendNotification",
         "/school_bus_cloud/Alarm/sendNotification",
@@ -870,9 +877,9 @@ async fn check_notifications(pool: &MySqlPool, disabled: Router) {
         .execute(pool)
         .await
         .unwrap();
-    let mut receiver = zeromq::PullSocket::new();
+    let mut receiver = http_dispatcher::Receiver::new();
     let endpoint = receiver
-        .bind("tcp://127.0.0.1:0")
+        .bind("http://127.0.0.1:0")
         .await
         .unwrap()
         .to_string();
@@ -889,7 +896,7 @@ async fn check_notifications(pool: &MySqlPool, disabled: Router) {
         .await
         .unwrap()
         .unwrap();
-    let value: Value = serde_json::from_str(&String::try_from(message).unwrap()).unwrap();
+    let value: Value = serde_json::from_str(&message).unwrap();
     assert_eq!(value["content"]["traffic_label"], "ALARM_TRAFFIC");
     assert_eq!(value["content"]["typeTrafficId"], 9);
     sqlx::query("INSERT INTO traffic_type VALUES (5,'BUS ARRIVING'),(18,'SKIPPED STOP'),(27,'MANUAL SKIPPED STOP')")
@@ -921,9 +928,9 @@ async fn check_notifications(pool: &MySqlPool, disabled: Router) {
                 .await
                 .unwrap();
         }
-        let mut receiver = zeromq::PullSocket::new();
+        let mut receiver = http_dispatcher::Receiver::new();
         let endpoint = receiver
-            .bind("tcp://127.0.0.1:0")
+            .bind("http://127.0.0.1:0")
             .await
             .unwrap()
             .to_string();
@@ -976,7 +983,7 @@ async fn check_notifications(pool: &MySqlPool, disabled: Router) {
             .await
             .unwrap()
             .unwrap();
-        let value: Value = serde_json::from_str(&String::try_from(message).unwrap()).unwrap();
+        let value: Value = serde_json::from_str(&message).unwrap();
         assert_eq!(
             value["content"]["traffic_label"],
             if traffic_type == 27 {
@@ -1052,7 +1059,7 @@ async fn alarm_notifications_save_optional_alerts_and_broadcast() {
             password: "test-password".into(),
             previous_password: String::new(),
             broadcast_enabled: false,
-            broadcast_endpoint: "tcp://127.0.0.1:1".into(),
+            broadcast_endpoint: "http://127.0.0.1:1".into(),
             broadcast_timeout: Duration::from_millis(300),
         })))
         .layer(Extension(Arc::new(VisionConfig {
@@ -1068,7 +1075,7 @@ async fn next_stop_notifications_require_authentication_and_notification_type() 
     let pool = MySqlPoolOptions::new()
         .connect_lazy("mysql://unused:unused@127.0.0.1:1/unused")
         .unwrap();
-    let app = make_app(pool, "tcp://127.0.0.1:1", None);
+    let app = make_app(pool, "http://127.0.0.1:1", None);
     for path in [
         "/Alarm/sendNextStopNotification",
         "/school_bus_cloud/Alarm/sendNextStopNotification",
@@ -1104,7 +1111,7 @@ async fn manual_skipped_stop_requires_authentication_and_valid_event_date() {
     let pool = MySqlPoolOptions::new()
         .connect_lazy("mysql://unused:unused@127.0.0.1:1/unused")
         .unwrap();
-    let app = make_app(pool, "tcp://127.0.0.1:1", None);
+    let app = make_app(pool, "http://127.0.0.1:1", None);
     for path in [
         "/Alarm/sendManualSkippedStopNotification",
         "/school_bus_cloud/Alarm/sendManualSkippedStopNotification",
@@ -1150,7 +1157,7 @@ async fn merged_routes_validate_authentication_and_comma_separated_ids() {
     let pool = MySqlPoolOptions::new()
         .connect_lazy("mysql://unused:unused@127.0.0.1:1/unused")
         .unwrap();
-    let app = make_app(pool, "tcp://127.0.0.1:1", None);
+    let app = make_app(pool, "http://127.0.0.1:1", None);
     for path in [
         "/DeviceTraffic/beginAMergeRoute",
         "/school_bus_cloud/DeviceTraffic/beginAMergeRoute",
@@ -1212,9 +1219,9 @@ async fn merged_route_starts_select_stops_save_each_route_and_publish() {
         INSERT INTO bus_routes_relationship VALUES (2,8,'2026-01-01 00:00:00');
         INSERT INTO business_routes VALUES (8,1);")
         .execute(&pool).await.unwrap();
-    let mut receiver = zeromq::PullSocket::new();
+    let mut receiver = http_dispatcher::Receiver::new();
     let endpoint = receiver
-        .bind("tcp://127.0.0.1:0")
+        .bind("http://127.0.0.1:0")
         .await
         .unwrap()
         .to_string();
@@ -1253,7 +1260,7 @@ async fn merged_route_starts_select_stops_save_each_route_and_publish() {
             .await
             .unwrap()
             .unwrap();
-        let value: Value = serde_json::from_str(&String::try_from(message).unwrap()).unwrap();
+        let value: Value = serde_json::from_str(&message).unwrap();
         assert_eq!(value["content"]["traffic_label"], "ROUTE_MAJOR_TRAFFIC");
         assert_eq!(value["content"]["typeTrafficId"], 3);
         published.push(value["content"]["id_route"].as_i64().unwrap());
@@ -1334,7 +1341,7 @@ async fn merged_end_requires_authentication_and_a_positive_situation() {
     let pool = MySqlPoolOptions::new()
         .connect_lazy("mysql://unused:unused@127.0.0.1:1/unused")
         .unwrap();
-    let app = make_app(pool, "tcp://127.0.0.1:1", None);
+    let app = make_app(pool, "http://127.0.0.1:1", None);
     for path in [
         "/DeviceTraffic/endAMergedRoute",
         "/school_bus_cloud/DeviceTraffic/endAMergedRoute",
@@ -1387,9 +1394,9 @@ async fn check_merged_end(pool: &MySqlPool) {
             .execute(pool)
             .await
             .unwrap();
-        let mut receiver = zeromq::PullSocket::new();
+        let mut receiver = http_dispatcher::Receiver::new();
         let endpoint = receiver
-            .bind("tcp://127.0.0.1:0")
+            .bind("http://127.0.0.1:0")
             .await
             .unwrap()
             .to_string();
@@ -1435,7 +1442,7 @@ async fn check_merged_end(pool: &MySqlPool) {
                 .await
                 .unwrap()
                 .unwrap();
-            let value: Value = serde_json::from_str(&String::try_from(message).unwrap()).unwrap();
+            let value: Value = serde_json::from_str(&message).unwrap();
             assert_eq!(value["content"]["typeTrafficId"], 4);
             assert_eq!(value["content"]["traffic_label"], "ROUTE_MAJOR_TRAFFIC");
             routes.push(value["content"]["id_route"].as_i64().unwrap());
@@ -1513,9 +1520,9 @@ async fn check_merged_interrupt(pool: &MySqlPool) {
         "/DeviceTraffic/interruptAMergedRoute",
         "/school_bus_cloud/DeviceTraffic/interruptAMergedRoute",
     ] {
-        let mut receiver = zeromq::PullSocket::new();
+        let mut receiver = http_dispatcher::Receiver::new();
         let endpoint = receiver
-            .bind("tcp://127.0.0.1:0")
+            .bind("http://127.0.0.1:0")
             .await
             .unwrap()
             .to_string();
@@ -1599,7 +1606,7 @@ async fn check_merged_interrupt(pool: &MySqlPool) {
                 .await
                 .unwrap()
                 .unwrap();
-            let value: Value = serde_json::from_str(&String::try_from(message).unwrap()).unwrap();
+            let value: Value = serde_json::from_str(&message).unwrap();
             assert_eq!(value["content"]["typeTrafficId"], 14);
             assert_eq!(value["content"]["traffic_label"], "ROUTE_MAJOR_TRAFFIC");
         }
@@ -1620,9 +1627,9 @@ async fn check_merged_interrupt(pool: &MySqlPool) {
     // Passenger failures must be reported without claiming committed route events vanished.
     sqlx::query("INSERT INTO traffic (traffic_type_id,user_id,datetime,device_id,trace_id,id_route,bus_info) VALUES (1,20,'2020-01-01 08:00:00',42,'passenger-failure',7,'2')").execute(pool).await.unwrap();
     sqlx::raw_sql("CREATE TRIGGER reject_merged_drop BEFORE INSERT ON traffic FOR EACH ROW BEGIN IF NEW.access_situation_id=20 THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='test passenger failure'; END IF; END").execute(pool).await.unwrap();
-    let mut receiver = zeromq::PullSocket::new();
+    let mut receiver = http_dispatcher::Receiver::new();
     let endpoint = receiver
-        .bind("tcp://127.0.0.1:0")
+        .bind("http://127.0.0.1:0")
         .await
         .unwrap()
         .to_string();

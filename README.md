@@ -140,7 +140,7 @@ DEVICE_STATUS_MIN_UPDATE_INTERVAL_SECONDS=15
 
 `APP_ENV` defaults to `local` for direct execution. Set it explicitly in non-local deployments.
 Enabled broadcasts require a URL and credentials at startup. HTTP connection/request timeouts
-are 3 seconds. `DASHBOARD_BROADCAST_ENABLED` and ZeroMQ settings now apply only to route endpoints.
+are 3 seconds. `DASHBOARD_BROADCAST_ENABLED` controls route and passenger HTTP dashboard publication.
 
 Compose includes persistent RabbitMQ and Redis services on loopback ports 5674/15674 and 6381,
 separate from the Java local stack's ports. The API uses host networking to reach these services
@@ -195,7 +195,7 @@ columns. Test fixture SQL is **not** a production migration. A missing trigger d
 still needs correcting in MySQL; this port does not change database users or triggers.
 
 After commit, it sends the original Vision route-start event **401** via UDP and
-publishes `ROUTE_MAJOR_TRAFFIC` through the existing ZeroMQ dashboard gateway.
+publishes `ROUTE_MAJOR_TRAFFIC` through the ReaxiumCloud HTTP dashboard gateway.
 The dashboard payload matches `GET_DEVICE_TRAFFIC_INFO_BY_ID`; the port uses a bound
 SELECT instead of calling that procedure. Channels use the device's most recent
 traffic route, matching ReaxiumCloud. The two downstream operations are attempted
@@ -206,7 +206,7 @@ Configure in `.env` (Compose passes these to the API):
 ```dotenv
 VISION_UDP_DESTINATION=YOUR_VISION_SERVER_IP:10004
 VISION_TIMEZONE=America/New_York
-DEVICE_STATUS_ZMQ_ENDPOINT=tcp://127.0.0.1:5555
+DEVICES_API_EXPORT_DEVICE_STATUS_URL=https://your-backend/school_bus_cloud/WebSocketPusher/dispatch
 DEVICE_STATUS_BROADCAST_TIMEOUT_SECONDS=5
 ```
 
@@ -219,7 +219,7 @@ format (including its nonstandard header-length and coordinate padding).
 
 The legacy HTTP-200 envelope is retained. Code `0` means the database committed
 and applicable downstream sends completed. UDP has no receiver acknowledgement,
-and ZeroMQ acceptance does not confirm dashboard delivery. Inactive devices skip
+and HTTP dispatcher success does not confirm dashboard delivery. Inactive devices skip
 Vision, as in the source. No interested businesses means no dashboard messages.
 An empty Vision destination is reported as `vision_status: "not_configured"`,
 not silently counted as success.
@@ -247,7 +247,7 @@ and sends to your configured downstream services. It does not retry the POST.
 
 The ignored `begin_route` integration test requires a disposable MySQL database named
 `device_api_migration_test`; it replaces the test schema. CI runs it after the existing
-DeviceStatus integration test. It uses local UDP/ZeroMQ receivers, verifies automatic
+DeviceStatus integration test. It uses local UDP/HTTP receivers, verifies automatic
 trigger writes, rollback, TIMESTAMP serialization, and truthful partial-failure responses.
 
 ## Send alarm notifications
@@ -452,7 +452,7 @@ with `./run-and-install/run.sh`. The existing destination is retained.
 Dashboard delivery can be disabled temporarily with
 `DASHBOARD_BROADCAST_ENABLED=false` in `.env` (currently set locally). This applies
 to both route endpoints and skips both dashboard data loading and
-ZeroMQ publication. Logs show `broadcast_status: "disabled"`. With Vision also
+HTTP dashboard publication. Logs show `broadcast_status: "disabled"`. With Vision also
 disabled, successful database commits return code 0; validation/database errors still
 fail. No skipped messages are queued or replayed. Set the switch to `true` and recreate
 the API to restore broadcasts. Existing gateway settings are retained.

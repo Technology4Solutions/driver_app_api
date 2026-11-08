@@ -48,12 +48,7 @@ pub async fn execute_access(
     } else {
         match tokio::time::timeout(
             config.broadcast_timeout,
-            broadcast::dispatch(
-                &pool,
-                &config.broadcast_endpoint,
-                request.device_id,
-                traffic_id,
-            ),
+            broadcast::dispatch(&pool, &config, request.device_id, traffic_id),
         )
         .await
         {

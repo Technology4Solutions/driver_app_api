@@ -6,7 +6,8 @@ use serde_json::{json, Value};
 use sqlx::{mysql::MySqlPoolOptions, MySqlPool, Row};
 use std::{sync::Arc, time::Duration};
 use tower::ServiceExt;
-use zeromq::{Socket, SocketRecv};
+#[path = "support/http_dispatcher.rs"]
+mod http_dispatcher;
 
 fn sample() -> Value {
     json!({"ReaxiumParameters":{"UserAccess":{
@@ -49,7 +50,7 @@ async fn access_paths_require_authentication_and_complete_valid_input() {
     let pool = MySqlPoolOptions::new()
         .connect_lazy("mysql://unused:unused@127.0.0.1:1/unused")
         .unwrap();
-    let app = app(pool, "tcp://127.0.0.1:1", true);
+    let app = app(pool, "http://127.0.0.1:1", true);
     for path in [
         "/UserAccess/executeAnAccessOfAUserInABus",
         "/school_bus_cloud/UserAccess/executeAnAccessOfAUserInABus",
@@ -130,9 +131,9 @@ async fn passenger_boarding_and_dropoff_save_metadata_trigger_rows_and_websocket
     }
     // Passenger channels follow latest device traffic, independently of passenger route.
     sqlx::query("INSERT INTO device_traffic (device_id,id_route,traffic_date) VALUES (42,7,'2026-10-21 07:00:00')").execute(&pool).await.unwrap();
-    let mut receiver = zeromq::PullSocket::new();
+    let mut receiver = http_dispatcher::Receiver::new();
     let endpoint = receiver
-        .bind("tcp://127.0.0.1:0")
+        .bind("http://127.0.0.1:0")
         .await
         .unwrap()
         .to_string();
@@ -175,7 +176,7 @@ async fn passenger_boarding_and_dropoff_save_metadata_trigger_rows_and_websocket
                 .await
                 .unwrap()
                 .unwrap();
-            let value: Value = serde_json::from_str(&String::try_from(message).unwrap()).unwrap();
+            let value: Value = serde_json::from_str(&message).unwrap();
             let c = &value["content"];
             assert_eq!(c["traffic_label"], "ACCESS_TRAFFIC");
             assert_eq!(c["typeTrafficId"], traffic_type);

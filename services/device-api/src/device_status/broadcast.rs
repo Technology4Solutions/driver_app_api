@@ -1,7 +1,6 @@
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use serde_json::{json, Map, Value};
 use sqlx::{mysql::MySqlRow, Column, MySqlPool, Row, TypeInfo, ValueRef};
-use zeromq::{Socket, SocketSend};
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
@@ -58,21 +57,21 @@ pub(crate) async fn channels(pool: &MySqlPool, device_id: i64) -> Result<Vec<Str
     Ok(channels)
 }
 
-pub(crate) async fn send(
-    endpoint: &str,
-    channels: &[String],
-    content: &Value,
-) -> Result<(), Error> {
-    let mut socket = zeromq::PushSocket::new();
-    socket.connect(endpoint).await?;
-    for channel in channels {
-        socket
-            .send(
-                json!({"channel":channel,"content":content})
-                    .to_string()
-                    .into(),
-            )
-            .await?;
+pub(crate) async fn send(config: &super::Config, content: &Value) -> Result<(), Error> {
+    let response = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(3))
+        .timeout(std::time::Duration::from_secs(3))
+        .user_agent("DeviceApiWebSocketClient/1.0")
+        .build()?
+        .post(&config.broadcast_endpoint)
+        .basic_auth(&config.username, Some(&config.password))
+        .json(&json!({"ReaxiumParameters":{"WebSocketPusher":{"content":content}}}))
+        .send()
+        .await?
+        .error_for_status()?;
+    let body: Value = response.json().await?;
+    if body["ReaxiumResponse"]["code"].as_i64() != Some(0) {
+        return Err("HTTP dashboard dispatcher did not report success".into());
     }
     Ok(())
 }
@@ -80,30 +79,53 @@ pub(crate) async fn send(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zeromq::SocketRecv;
+    use axum::{
+        http::{HeaderMap, StatusCode},
+        routing::post,
+        Json, Router,
+    };
+    use std::time::Duration;
 
     #[tokio::test]
-    async fn publishes_the_legacy_wire_envelope_to_every_channel() {
-        let mut receiver = zeromq::PullSocket::new();
-        let endpoint = receiver.bind("tcp://127.0.0.1:0").await.unwrap();
-        let channels = vec![
-            "CHANNEL_REAXIUM_SCHOOL_BUSINESS_1".into(),
-            "CHANNEL_REAXIUM_SCHOOL_BUSINESS_2".into(),
-        ];
-        let content = json!({"device_id":42,"channels":channels});
-        send(&endpoint.to_string(), &channels, &content)
-            .await
-            .unwrap();
-        for channel in channels {
-            let message = tokio::time::timeout(std::time::Duration::from_secs(2), receiver.recv())
-                .await
-                .unwrap()
-                .unwrap();
-            let text = String::try_from(message).unwrap();
-            assert_eq!(
-                serde_json::from_str::<Value>(&text).unwrap(),
-                json!({"channel":channel,"content":content})
+    async fn http_dispatch_uses_shared_credentials_and_checks_gateway_result() {
+        for (status, body, succeeds) in [
+            (StatusCode::OK, json!({"ReaxiumResponse":{"code":0}}), true),
+            (StatusCode::OK, json!({"ReaxiumResponse":{"code":3}}), false),
+            (StatusCode::SERVICE_UNAVAILABLE, json!({}), false),
+        ] {
+            let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+            let app = Router::new().route(
+                "/dispatch",
+                post(move |headers: HeaderMap, Json(request): Json<Value>| {
+                    let sender = sender.clone();
+                    let body = body.clone();
+                    async move {
+                        sender.send((headers, request)).unwrap();
+                        (status, Json(body))
+                    }
+                }),
             );
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let config = super::super::Config {
+                username: "api".into(),
+                password: "password".into(),
+                previous_password: String::new(),
+                broadcast_enabled: true,
+                broadcast_endpoint: format!("http://{}/dispatch", listener.local_addr().unwrap()),
+                broadcast_timeout: Duration::from_secs(5),
+            };
+            let server = tokio::spawn(async move {
+                axum::serve(listener, app).await.unwrap();
+            });
+            let content = json!({"device_id":935,"traffic_label":"ROUTE_MAJOR_TRAFFIC"});
+            assert_eq!(send(&config, &content).await.is_ok(), succeeds);
+            let (headers, request) = receiver.recv().await.unwrap();
+            assert_eq!(headers["authorization"], "Basic YXBpOnBhc3N3b3Jk");
+            assert_eq!(
+                request,
+                json!({"ReaxiumParameters":{"WebSocketPusher":{"content":content}}})
+            );
+            server.abort();
         }
     }
 }

@@ -4,7 +4,7 @@ use sqlx::MySqlPool;
 
 pub(super) async fn dispatch(
     pool: &MySqlPool,
-    endpoint: &str,
+    config: &crate::device_status::Config,
     device_id: i64,
     traffic_id: u64,
 ) -> Result<&'static str, super::Error> {
@@ -20,6 +20,6 @@ pub(super) async fn dispatch(
         return Ok("skipped_no_businesses");
     }
     content["channels"] = json!(channels);
-    send(endpoint, &channels, &content).await?;
+    send(config, &content).await?;
     Ok("sent")
 }

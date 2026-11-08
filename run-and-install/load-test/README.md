@@ -22,7 +22,7 @@ or repeat a device across VUs. For more than 8 concurrent devices, seed valid re
 records in a dedicated test database and export again.
 
 Run against an **isolated API with a matching database copy**. Configure that API's
-Vision and ZeroMQ destinations to local test receivers. This runner does not redirect
+Vision and HTTP dashboard destinations to local test receivers. This runner does not redirect
 the API's downstream services. It inserts traffic and deletes device activity.
 The exported IDs alone do not isolate your running application.
 

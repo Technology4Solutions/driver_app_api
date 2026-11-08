@@ -73,11 +73,10 @@ If using the SSH setup, keep your tunnel running in another terminal:
 
 ```bash
 ssh -N -o ExitOnForwardFailure=yes \
-  -L 127.0.0.1:3307:127.0.0.1:3306 \
-  -L 127.0.0.1:5555:127.0.0.1:5555 SSH_USER@SSH_SERVER
+  -L 127.0.0.1:3307:127.0.0.1:3306 SSH_USER@SSH_SERVER
 ```
 
-This example assumes MySQL and the ZeroMQ relay run on the SSH server. For other
+This example assumes MySQL runs on the SSH server. For other
 hosts, replace each forwarding destination with the address reachable from that server.
 
 ## API tests
@@ -148,7 +147,8 @@ then run:
 
 This writes `device_traffic` and `device_activity` and sends Vision/dashboard updates.
 Configure `VISION_UDP_DESTINATION` and `VISION_TIMEZONE` in `.env`; the dashboard
-uses `DEVICE_STATUS_ZMQ_ENDPOINT`. The script checks the response envelope, not just
+uses `DEVICES_API_EXPORT_DEVICE_STATUS_URL` with `REAXIUM_API_USER` and
+`REAXIUM_API_PASSWORD`. The script checks the response envelope, not just
 HTTP 200. If the response says `database_saved: true`, do not resubmit the route start.
 
 To finish a route, use `--end-route json/end-route.example.json` (from this directory),
