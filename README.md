@@ -717,3 +717,56 @@ curl -i -u "$REAXIUM_API_USER:$REAXIUM_API_PASSWORD" \
   --data-binary @run-and-install/json/interrupt-merged-route.example.json \
   "$BASE_URL/DeviceTraffic/interruptAMergedRoute"
 ```
+
+## Record passenger access
+
+`POST /UserAccess/executeAnAccessOfAUserInABus` and
+`/school_bus_cloud/UserAccess/executeAnAccessOfAUserInABus` use Basic authentication
+and `ReaxiumParameters.UserAccess`. Required fields are `user_id`, `device_id`,
+`traffic_type`, `access_type`, `traffic_info`, `trace_id`, `latitude`, `longitude`,
+`bus_info` (bus ID), `accessDate`, `stop_id`, `stop_id_by_distance`, `route_id`, and
+`access_situation_id`. Numeric fields accept numeric strings. `accessDate` is a Unix
+**millisecond timestamp**, converted to America/New_York and stored to whole seconds.
+Replace the example timestamp with the actual event time.
+
+The device supplies the decision: type 1 normally boards, type 2 drops off, and the
+supplied type/situation are preserved. This is not RFID/password authentication or
+an authorization decision. `access_id` is the first `user_access_data` row matching
+user and access method, without a status filter, matching `GET_USER_ACCESS_ID`.
+If no credential exists the database determines whether NULL is permitted; the
+standard schema requires it and rejects the insert. No credential is fabricated.
+
+The service inserts `traffic`, retaining trace, location, stops and bus ID.
+Stop identity prefers a positive `stop_id_by_distance`, else `stop_id`. A missing
+preferred stop produces NULL snapshots without a second lookup. Snapshots are
+written when supported by the installed schema. `assigned_bus` is the latest route
+assignment's bus number; there is no `bus_info` fallback. Existing database triggers
+(such as `traffic_insert` writing `traffic_view`) execute within the transaction.
+
+After commit, enriched passenger/route/stop data is published to business WebSocket
+channels determined by the device's latest device traffic. Enrichment matches
+`GET_TRAFFIC_INFO_BY_ID`, including its INNER JOIN on `stop_id_by_distance`.
+Types 1/2 use `ACCESS_TRAFFIC`; other types use the shared traffic label mapping.
+There is no Vision transmission, separate alert, device activity change, or direct
+parent push/email/SMS in this service. Boardings with the same trace ID are available
+to route-interruption automatic drop-offs.
+
+Success returns application code 0, `SUCCESSFUL REQUEST`, and an empty object array.
+Validation/storage errors use code 13 (Basic authentication rejection uses code 3,
+consistent with other Rust endpoints). A publication failure reports code 13 with
+`object.database_saved: true`, `traffic_id` and `broadcast_status`; do not resubmit
+that saved event. Disabling broadcasts skips enrichment and network IO. Compared
+with PHP, the API retains stricter validation, Basic credentials, transactions,
+sanitized error messages and explicit delivery reporting. It does not upsert or
+ignore duplicates: the database's existing unique key remains authoritative.
+
+```bash
+curl -i -u "$REAXIUM_API_USER:$REAXIUM_API_PASSWORD" \
+  -H 'Content-Type: application/json' \
+  --data-binary @run-and-install/json/user-access.example.json \
+  "$BASE_URL/UserAccess/executeAnAccessOfAUserInABus"
+```
+
+The isolated `user_access` database test uses `device_api_migration_test`, with the
+same timezone data prerequisite as interruption tests. Run it separately from other
+database tests because fixtures rebuild the same tables.

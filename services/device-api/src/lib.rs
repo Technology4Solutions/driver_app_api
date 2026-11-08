@@ -2,6 +2,7 @@ pub mod database;
 pub mod device_status;
 pub mod device_traffic;
 pub mod telemetry;
+pub mod user_access;
 
 use axum::{middleware, routing::get, Router};
 use telemetry::Metrics;
@@ -9,6 +10,14 @@ use tower_http::trace::TraceLayer;
 
 pub fn router(metrics: Metrics) -> Router {
     Router::new()
+        .route(
+            "/UserAccess/executeAnAccessOfAUserInABus",
+            axum::routing::post(user_access::execute_access),
+        )
+        .route(
+            "/school_bus_cloud/UserAccess/executeAnAccessOfAUserInABus",
+            axum::routing::post(user_access::execute_access),
+        )
         .route(
             "/DeviceTraffic/interruptAMergedRoute",
             axum::routing::post(device_traffic::interrupt_merged_route),

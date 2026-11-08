@@ -1,0 +1,20 @@
+{
+  "ReaxiumParameters": {
+    "UserAccess": {
+      "user_id": 12345,
+      "device_id": 935,
+      "traffic_type": 1,
+      "access_type": 3,
+      "traffic_info": "Test passenger boarding",
+      "trace_id": "test-merged-route-003",
+      "latitude": 27.1975,
+      "longitude": -80.2528,
+      "bus_info": "364",
+      "accessDate": 1792584000000,
+      "stop_id": 1061,
+      "stop_id_by_distance": 1061,
+      "route_id": 107,
+      "access_situation_id": 1
+    }
+  }
+}

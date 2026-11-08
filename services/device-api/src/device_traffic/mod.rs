@@ -1,4 +1,5 @@
 mod broadcast;
+pub(crate) use broadcast::traffic_label;
 mod merged;
 mod model;
 pub use merged::{begin_merged_route, end_merged_route, interrupt_merged_route};

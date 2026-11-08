@@ -34,7 +34,7 @@ pub(super) async fn dispatch(
     Ok("sent")
 }
 
-fn traffic_label(traffic_type: i64) -> Option<&'static str> {
+pub(crate) fn traffic_label(traffic_type: i64) -> Option<&'static str> {
     match traffic_type {
         3 | 4 | 14 => Some("ROUTE_MAJOR_TRAFFIC"),
         5 | 15 | 16 | 18 => Some("ROUTE_MINOR_TRAFFIC"),
