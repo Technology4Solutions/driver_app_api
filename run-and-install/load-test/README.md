@@ -54,7 +54,7 @@ for the API; the literal Z is used to format deterministically, not to override 
 API's VISION_TIMEZONE. Start/end are a minute apart; successive journeys advance two
 minutes. Event time is simulated and does not follow real elapsed test duration.
 
-The report includes HTTP timing, application success, database-save rate, and
+The report includes HTTP timing, application success, database-save or queue-acceptance rate, and
 completed journeys. HTTP 200 alone is not success. Code 3 with database_saved=true
 is counted as a saved request but fails the application-success threshold. The test
 still ends the saved journey; it never retries the start. An unsaved or unknown
@@ -272,3 +272,86 @@ host absolute path; `.k6-web/results` is a separate writable mount for temporary
 summaries. k6 uses host networking, so its default API URL remains
 `http://127.0.0.1:8080`. The control page uses Docker bridge networking with
 `5665:5665` published. Troubleshoot with `docker logs --tail 60 driver-app-k6-web`.
+
+## Coverage for every business service
+
+The CLI and web page share `services.json`. Select any of these `SERVICE` values:
+
+| SERVICE | Endpoint |
+|---|---|
+| `deviceStatus` | `/device/DeviceStatus/update` |
+| `beginARoute` | `/DeviceTraffic/beginARoute` |
+| `endARoute` | `/DeviceTraffic/endARoute` |
+| `interruptARoute` | `/DeviceTraffic/interruptARoute` |
+| `sendTraffic` | `/DeviceTraffic/sendTraffic` |
+| `beginAMergeRoute` | `/DeviceTraffic/beginAMergeRoute` |
+| `endAMergedRoute` | `/DeviceTraffic/endAMergedRoute` |
+| `interruptAMergedRoute` | `/DeviceTraffic/interruptAMergedRoute` |
+| `sendNotification` | `/Alarm/sendNotification` |
+| `sendNextStopNotification` | `/Alarm/sendNextStopNotification` |
+| `sendSkippedStopNotification` | `/Alarm/sendSkippedStopNotification` |
+| `sendManualSkippedStopNotification` | `/Alarm/sendManualSkippedStopNotification` |
+| `executeAnAccessOfAUserInABus` | `/UserAccess/executeAnAccessOfAUserInABus` |
+
+`SERVICE=journey` remains begin + end. `SERVICE=allServices` sends each of the
+13 business requests once per iteration, in the order in `services.json`. One VU
+owns one device; all requests in an iteration share a unique trace. Start with:
+
+```bash
+SERVICE=sendNextStopNotification VUS=1 JOURNEYS=1 ./run-and-install/load-test/start.sh
+SERVICE=allServices VUS=1 JOURNEYS=1 ./run-and-install/load-test/start.sh
+```
+
+The web selector offers the same services and shows the expected request count.
+`allServices` is a coverage scenario, not a realistic bus trip: it exercises normal,
+merged, and interrupted endings in the same iteration. It does not wait for the
+asynchronous DeviceStatus worker, which can change device activity after later
+requests. Run the individual services when measuring endpoint performance.
+
+### Additional fixture requirements
+
+Re-export datasets using `export-devices.py` for the new services. The SELECT-only
+export also includes:
+
+- `route_ids`: comma-separated active routes assigned to the bus, with valid linked
+  stops. Merged tests require at least two distinct routes; single-route devices
+  remain usable for the other tests.
+- `passenger_id` and `access_type`: an active passenger on the selected route with
+  a matching `user_access_data` entry. Null values mean this device cannot run the
+  passenger or all-services test. These fields are IDs, not credential secrets.
+
+Existing datasets continue to work for existing services. Missing related IDs fail
+validation before k6 sends any request. Choose eligible rows in a separate dataset
+or seed the necessary relationships in the isolated database; do not substitute
+unrelated passenger or route IDs. The exporter does not modify the database.
+
+`sendNotification` uses notification type 9; next stop uses 5; skipped stop uses 18;
+manual skipped stop includes `traffic_date`. `sendTraffic` uses traffic type 15.
+Passenger access uses boarding type 1 with the selected credential method. These
+are baseline success scenarios, not every possible business input combination.
+End/interruption tests can remove device activity. Merged interruption can also
+create automatic passenger dropoffs for the shared trace.
+
+### Results and verification
+
+HTTP 200 alone does not pass a test. Every endpoint has an application-success
+threshold. `database_saved` covers synchronous services; `queue_accepted` covers
+DeviceStatus, whose successful response only confirms enqueueing. Verify actual
+DeviceStatus persistence separately after its worker processes the queue.
+Merged error responses are checked route by route: incomplete/unknown saves abort;
+confirmed saves with downstream failures fail the success threshold without retries.
+
+The local verification commands never call your deployed API:
+
+```bash
+node run-and-install/load-test/test-payloads.mjs
+python3 run-and-install/load-test/test-runner.py
+python3 -m unittest discover -s run-and-install/load-test/web -p test_server.py
+```
+
+The k6 mock checks exercise all services, the all-services sequence, namespaces,
+authentication, unique traces, validation, and partial-save failures. Node checks
+also compare the service catalog with the registered Rust business routes.
+
+Commit and deploy the runner files to update the DEV web page; the API binary
+has not changed and does not need rebuilding for these tests.

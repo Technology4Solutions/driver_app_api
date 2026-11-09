@@ -770,3 +770,10 @@ curl -i -u "$REAXIUM_API_USER:$REAXIUM_API_PASSWORD" \
 The isolated `user_access` database test uses `device_api_migration_test`, with the
 same timezone data prerequisite as interruption tests. Run it separately from other
 database tests because fixtures rebuild the same tables.
+
+## k6 load tests
+
+The CLI and DEV web runner cover all 13 business services individually, plus
+route journeys and an all-services scenario. See
+[load-test instructions](run-and-install/load-test/README.md#coverage-for-every-business-service)
+for dataset requirements, commands, and verification.

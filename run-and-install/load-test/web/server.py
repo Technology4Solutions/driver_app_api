@@ -18,6 +18,7 @@ from socketserver import ThreadingMixIn
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parent
+SERVICES = json.loads((ROOT.parent / 'services.json').read_text())
 
 
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
@@ -73,7 +74,7 @@ class Runner:
             data['username'] = self.credentials['REAXIUM_API_USER']
             data['password'] = self.credentials['REAXIUM_API_PASSWORD']
         service = data.get('service')
-        if service not in ('deviceStatus', 'beginARoute', 'endARoute', 'journey'):
+        if service not in SERVICES:
             raise ValueError('Choose a valid service')
         vus, journeys = data.get('vus'), data.get('journeys')
         if type(vus) is not int or not 1 <= vus <= self.count:
@@ -211,8 +212,8 @@ def make_handler(runner, token, public_host=None, access_token=None):
             if self.path == '/api/state':
                 return self.reply(200, runner.snapshot())
             if self.path == '/api/config':
-                return self.reply(200, {'token': token, 'devices': runner.count, 'api_url': runner.api_url, 'dataset': runner.dataset.name, 'credentials_configured': runner.credentials_ready()})
-            files = {'/': ('index.html', 'text/html; charset=utf-8'), '/app.js': ('app.js', 'text/javascript'), '/style.css': ('style.css', 'text/css')}
+                return self.reply(200, {'token': token, 'devices': runner.count, 'api_url': runner.api_url, 'dataset': runner.dataset.name, 'credentials_configured': runner.credentials_ready(), 'services': SERVICES})
+            files = {'/': ('index.html', 'text/html; charset=utf-8'), '/app.js': ('app.js', 'text/javascript'), '/style.css': ('style.css', 'text/css'), '/reaxium-dismissal-logo.png': ('reaxium-dismissal-logo.png', 'image/png')}
             if self.path not in files:
                 return self.reply(404, {'error': 'Not found'})
             filename, kind = files[self.path]

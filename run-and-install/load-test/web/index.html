@@ -1,11 +1,12 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Driver API · Load tests</title><link rel="stylesheet" href="/style.css"><script defer src="/app.js"></script></head>
-<body><header><span class="brand">REAXIUM <b>/</b> ENGINEERING</span><span class="badge">k6 TEST RUNNER</span></header>
+<body><header><div class="brand"><img src="/reaxium-dismissal-logo.png" alt="ReaXium School Bus" width="1250" height="294"></div><span class="badge">k6 TEST RUNNER</span></header>
 <main><div class="heading"><div><p class="eyebrow">PERFORMANCE LAB</p><h1>Put your API to the test.</h1><p class="muted">Configure a run. Watch the results. Find the bottleneck.</p></div><span id="status" role="status">Connecting…</span></div>
 <div class="layout"><section class="panel"><h2>Configure test</h2><p id="target" class="muted"></p><form id="form">
-<label>Service<select id="service"><option value="deviceStatus">Device status</option><option value="journey">Journey · begin + end route</option><option value="beginARoute">Begin a route</option><option value="endARoute">End a route</option></select></label>
+<label>Service<select id="service" aria-describedby="service-details"></select></label>
+<p id="service-details" class="hint" aria-live="polite"></p>
 <div class="pair"><label>Concurrent devices<input id="vus" type="number" min="1" value="1" required></label><label>Repetitions / device<input id="journeys" type="number" min="1" max="100000" value="1" required></label></div>
-<p id="estimate" class="hint"></p><div class="pair"><label>Simulated start<input id="date" type="datetime-local" step="1" required></label><label>Maximum duration<input id="duration" value="30m" pattern="[1-9][0-9]{0,3}[smh]" required></label></div>
+<p id="estimate" class="hint"></p><p class="hint">Merged-route tests need two related routes per device. Passenger tests need a passenger and access method in the dataset. Re-export older datasets before selecting All services.</p><div class="pair"><label>Simulated start<input id="date" type="datetime-local" step="1" required></label><label>Maximum duration<input id="duration" value="30m" pattern="[1-9][0-9]{0,3}[smh]" required></label></div>
 <p id="credential-note" class="hint" hidden>API credentials loaded from server configuration.</p><div id="credentials"><label>API username<input id="username" autocomplete="off" required></label><label>API password<input id="password" type="password" autocomplete="off" required></label></div>
 <label class="confirm"><input id="acknowledge" type="checkbox" required><span>I am using a test database. These requests write data and may trigger downstream broadcasts.</span></label>
 <div class="actions"><button id="start" type="submit" disabled>Start test ↗</button><button id="stop" type="button" class="secondary" disabled>Stop</button></div><p id="error" role="alert"></p></form></section>

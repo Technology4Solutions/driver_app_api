@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 from types import SimpleNamespace
 
-from server import Runner, make_handler, load_credentials
+from server import Runner, make_handler, load_credentials, SERVICES
 
 
 class Connection:
@@ -53,6 +53,14 @@ class Tests(unittest.TestCase):
             self.assertIn(b'401 Unauthorized', result)
             self.assertNotIn(b'csrf', result)
         self.assertIn(b'200 OK', self.request())
+
+    def test_logo_asset_is_served_and_requires_login(self):
+        response = self.request(path='/reaxium-dismissal-logo.png')
+        self.assertIn(b'200 OK', response)
+        self.assertIn(b'Content-Type: image/png', response)
+        self.assertEqual(response.split(b'\r\n\r\n', 1)[1],
+                         Path(__file__).with_name('reaxium-dismissal-logo.png').read_bytes())
+        self.assertIn(b'401 Unauthorized', self.request(path='/reaxium-dismissal-logo.png', auth=False))
 
     def test_host_origin_and_csrf(self):
         self.assertIn(b'403', self.request(host='attacker.example:5665'))
@@ -113,6 +121,16 @@ class Tests(unittest.TestCase):
         self.assertNotIn('fixture', json.dumps(runner.snapshot()))
         with patch.dict('os.environ', {'REAXIUM_API_USER': 'override'}, clear=True):
             self.assertEqual(load_credentials(env_file)['REAXIUM_API_USER'], 'override')
+
+    def test_every_catalog_service_is_available_in_config_and_launchable(self):
+        response = self.request()
+        for service in SERVICES:
+            self.assertIn(('"' + service + '"').encode(), response)
+            with patch('server.threading.Thread') as thread:
+                thread.return_value.is_alive.return_value = False
+                self.runner.start(dict(self.data, service=service))
+                self.assertEqual(thread.call_args.kwargs['args'][0]['SERVICE'], service)
+                thread.return_value.start.assert_called_once()
 
     def test_python35_compatibility_and_random_tokens(self):
         from server import token_urlsafe

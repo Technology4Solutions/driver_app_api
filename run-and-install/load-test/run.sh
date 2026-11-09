@@ -10,7 +10,12 @@ device_count="$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1
 export VUS="${VUS:-$device_count}" JOURNEYS="${JOURNEYS:-10}" MAX_DURATION="${MAX_DURATION:-30m}"
 export SERVICE="${SERVICE:-journey}"
 if [[ "$SERVICE" == startARoute ]]; then SERVICE=beginARoute; fi
-case "$SERVICE" in journey|beginARoute|endARoute|deviceStatus) ;; *) echo 'SERVICE must be journey, beginARoute, endARoute, or deviceStatus' >&2; exit 2 ;; esac
+python3 - "$script_dir/services.json" "$SERVICE" <<'CHECK_SERVICE'
+import json, sys
+services = json.load(open(sys.argv[1]))
+if sys.argv[2] not in services:
+    raise SystemExit('SERVICE must be one of: ' + ', '.join(services))
+CHECK_SERVICE
 export RUN_ID="${RUN_ID:-$(python3 -c 'import uuid; print(uuid.uuid4().hex)')}"
 dataset="$(realpath -- "$1")"
 echo "Run $RUN_ID: $VUS devices, $JOURNEYS iterations each, service=$SERVICE; writes to $API_BASE_URL."

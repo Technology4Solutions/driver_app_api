@@ -27,5 +27,14 @@ WITH route_stops AS (
 SELECT JSON_OBJECT('device_id',device_id,'device_imei',device_imei,'business_id',business_id,'route_id',route_id,'driver_id',driver_id,
  'bus_info',CAST(bus_id AS CHAR),'start_stop_id',start_stop_id,'end_stop_id',end_stop_id,
  'start_latitude',start_latitude,'start_longitude',start_longitude,
- 'end_latitude',end_latitude,'end_longitude',end_longitude)
+ 'end_latitude',end_latitude,'end_longitude',end_longitude,
+ 'route_ids',(SELECT GROUP_CONCAT(DISTINCT mr.id_route ORDER BY mr.id_route SEPARATOR ',')
+              FROM bus_routes_relationship mbr JOIN routes mr ON mr.id_route=mbr.id_route AND mr.status_id=1
+              JOIN route_stops mrs ON mrs.id_route=mr.id_route WHERE mbr.bus_id=candidates.bus_id),
+ 'passenger_id',(SELECT ua.user_id FROM route_users ru JOIN users passenger ON passenger.user_id=ru.user_id AND passenger.status_id=1
+                 JOIN user_access_data ua ON ua.user_id=passenger.user_id AND ua.access_type_id>0
+                 WHERE ru.id_route=candidates.route_id ORDER BY ua.user_access_data_id LIMIT 1),
+ 'access_type',(SELECT ua.access_type_id FROM route_users ru JOIN users passenger ON passenger.user_id=ru.user_id AND passenger.status_id=1
+                JOIN user_access_data ua ON ua.user_id=passenger.user_id AND ua.access_type_id>0
+                WHERE ru.id_route=candidates.route_id ORDER BY ua.user_access_data_id LIMIT 1))
 FROM candidates WHERE choice=1 ORDER BY device_id LIMIT __LIMIT__;

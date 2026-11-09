@@ -1,0 +1,92 @@
+{
+  "deviceStatus": {
+    "label": "Device status",
+    "path": "/device/DeviceStatus/update",
+    "namespace": "DeviceStatus"
+  },
+  "beginARoute": {
+    "label": "Begin a route",
+    "path": "/DeviceTraffic/beginARoute",
+    "namespace": "DeviceTraffic"
+  },
+  "endARoute": {
+    "label": "End a route",
+    "path": "/DeviceTraffic/endARoute",
+    "namespace": "DeviceTraffic"
+  },
+  "interruptARoute": {
+    "label": "Interrupt a route",
+    "path": "/DeviceTraffic/interruptARoute",
+    "namespace": "DeviceTraffic"
+  },
+  "sendTraffic": {
+    "label": "Send route traffic",
+    "path": "/DeviceTraffic/sendTraffic",
+    "namespace": "DeviceTraffic"
+  },
+  "beginAMergeRoute": {
+    "label": "Begin merged routes",
+    "path": "/DeviceTraffic/beginAMergeRoute",
+    "namespace": "DeviceTraffic"
+  },
+  "endAMergedRoute": {
+    "label": "End merged routes",
+    "path": "/DeviceTraffic/endAMergedRoute",
+    "namespace": "DeviceTraffic"
+  },
+  "interruptAMergedRoute": {
+    "label": "Interrupt merged routes",
+    "path": "/DeviceTraffic/interruptAMergedRoute",
+    "namespace": "DeviceTraffic"
+  },
+  "sendNotification": {
+    "label": "Send alarm notification",
+    "path": "/Alarm/sendNotification",
+    "namespace": "Notification"
+  },
+  "sendNextStopNotification": {
+    "label": "Next-stop notification",
+    "path": "/Alarm/sendNextStopNotification",
+    "namespace": "Notification"
+  },
+  "sendSkippedStopNotification": {
+    "label": "Skipped-stop notification",
+    "path": "/Alarm/sendSkippedStopNotification",
+    "namespace": "Notification"
+  },
+  "sendManualSkippedStopNotification": {
+    "label": "Manual skipped-stop notification",
+    "path": "/Alarm/sendManualSkippedStopNotification",
+    "namespace": "Notification"
+  },
+  "executeAnAccessOfAUserInABus": {
+    "label": "Passenger bus access",
+    "path": "/UserAccess/executeAnAccessOfAUserInABus",
+    "namespace": "UserAccess"
+  },
+  "journey": {
+    "label": "Journey \u00b7 begin + end route",
+    "steps": [
+      "beginARoute",
+      "endARoute"
+    ]
+  },
+  "allServices": {
+    "label": "All 13 business services",
+    "steps": [
+      "deviceStatus",
+      "beginARoute",
+      "beginAMergeRoute",
+      "executeAnAccessOfAUserInABus",
+      "sendNotification",
+      "sendNextStopNotification",
+      "sendSkippedStopNotification",
+      "sendManualSkippedStopNotification",
+      "sendTraffic",
+      "endARoute",
+      "interruptARoute",
+      "endAMergedRoute",
+      "interruptAMergedRoute"
+    ]
+  }
+}
