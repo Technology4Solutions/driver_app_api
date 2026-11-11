@@ -158,13 +158,17 @@ async fn handle(
     body: Result<Json<Value>, JsonRejection>,
     action: Action,
 ) -> Json<Value> {
+    tracing::info!(?action, "route traffic request received");
     if !config.authorized(&headers) {
+        tracing::warn!(?action, reason = "authentication", "route traffic request rejected");
         return response(3, "Invalid Authentication");
     }
     let Ok(Json(body)) = body else {
+        tracing::warn!(?action, reason = "json_body", "route traffic request rejected");
         return response(3, "Invalid Json Object");
     };
     let Some(parameters) = body.get("ReaxiumParameters") else {
+        tracing::warn!(?action, reason = "missing_ReaxiumParameters", "route traffic request rejected");
         return response(3, "Invalid Json Header");
     };
     let request = if matches!(
@@ -189,8 +193,27 @@ async fn handle(
         parameters
             .get("DeviceTraffic")
             .cloned()
-            .and_then(|v| serde_json::from_value::<BeginRoute>(v).ok())
+            .and_then(|v| match serde_json::from_value::<BeginRoute>(v) {
+                Ok(request) => Some(request),
+                Err(error) => {
+                    tracing::warn!(?action, error_category = ?error.classify(), "route traffic payload could not be decoded; check field types and required fields");
+                    None
+                }
+            })
     };
+    if let Some(r) = &request {
+        tracing::info!(
+            ?action, device_id = r.device_id, route_id = r.route_id,
+            valid_device = r.device_id > 0, valid_stop = r.stop_id > 0,
+            valid_route = r.route_id > 0 && r.route_id <= u32::MAX as i64,
+            valid_driver = r.driver_id > 0, has_trace = !r.trace_id.trim().is_empty(),
+            valid_bus_id = r.bus_info.trim().parse::<u64>().is_ok_and(|id| id > 0),
+            valid_latitude = (-90.0..=90.0).contains(&r.latitude),
+            valid_longitude = (-180.0..=180.0).contains(&r.longitude),
+            valid_date = r.traffic_date.replace("::", ":").len() == 19 && r.date().is_ok(),
+            "route traffic payload validation"
+        );
+    }
     let Some(request) = request.filter(|r| {
         r.valid()
             && match action {
@@ -207,6 +230,7 @@ async fn handle(
                 _ => r.traffic_situation_id.is_some_and(|id| id > 0),
             }
     }) else {
+        tracing::warn!(?action, reason = "invalid_parameters", "route traffic request rejected");
         return response(
             3,
             "Invalid Parameters received, please checkout the api documentation",
