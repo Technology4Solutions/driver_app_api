@@ -1,6 +1,7 @@
 pub mod database;
 pub mod device_status;
 pub mod device_traffic;
+mod json_body;
 pub mod telemetry;
 pub mod user_access;
 

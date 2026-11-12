@@ -361,3 +361,111 @@ async fn passenger_boarding_and_dropoff_save_metadata_trigger_rows_and_websocket
         .fetch_one(&pool).await.unwrap();
     assert_eq!(drops, 1);
 }
+
+#[tokio::test]
+async fn legacy_volley_headers_reach_access_validation_on_both_paths() {
+    let pool = MySqlPoolOptions::new()
+        .connect_lazy("mysql://unused:unused@127.0.0.1:1/unused")
+        .unwrap();
+    let app = app(pool, "http://127.0.0.1:1", true);
+    let mut input = sample();
+    // Force validation to stop before DB access after decoding the legacy body.
+    input["ReaxiumParameters"]["UserAccess"]["latitude"] = json!(91);
+    for path in [
+        "/UserAccess/executeAnAccessOfAUserInABus",
+        "/school_bus_cloud/UserAccess/executeAnAccessOfAUserInABus",
+    ] {
+        for content_types in [
+            vec!["application/json; charset=UTF-8"],
+            vec![
+                "application/json; charset=UTF-8",
+                "application/json; charset=utf-8",
+            ],
+            vec!["application/json; charset=UTF-8, application/json; charset=utf-8"],
+        ] {
+            let mut request = Request::post(path).header(
+                "authorization",
+                format!("Basic {}", STANDARD.encode("test:test-password")),
+            );
+            for content_type in content_types {
+                request = request.header("content-type", content_type);
+            }
+            let response = app
+                .clone()
+                .oneshot(request.body(Body::from(input.to_string())).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), 200);
+            let result: Value =
+                serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
+                    .unwrap();
+            assert_eq!(result["ReaxiumResponse"]["code"], 13);
+            assert!(result["ReaxiumResponse"]["message"]
+                .as_str()
+                .unwrap()
+                .starts_with("Invalid Parameters"));
+        }
+    }
+}
+
+#[tokio::test]
+async fn legacy_access_headers_preserve_auth_json_and_body_size_checks() {
+    let pool = MySqlPoolOptions::new()
+        .connect_lazy("mysql://unused:unused@127.0.0.1:1/unused")
+        .unwrap();
+    let app = app(pool, "http://127.0.0.1:1", true);
+    for path in [
+        "/UserAccess/executeAnAccessOfAUserInABus",
+        "/school_bus_cloud/UserAccess/executeAnAccessOfAUserInABus",
+    ] {
+        for (content_type, body, authenticated, expected) in [
+            (
+                "application/json, application/json",
+                "{}".to_owned(),
+                false,
+                "Invalid Authentication",
+            ),
+            (
+                "application/json, application/json",
+                "{".to_owned(),
+                true,
+                "Invalid Json Object",
+            ),
+            (
+                "application/json, text/plain",
+                "{}".to_owned(),
+                true,
+                "Invalid Json Object",
+            ),
+            ("text/plain", "{}".to_owned(), true, "Invalid Json Object"),
+            (
+                "application/json, application/json",
+                " ".repeat(2 * 1024 * 1024 + 1),
+                true,
+                "Invalid Json Object",
+            ),
+        ] {
+            let mut request = Request::post(path).header("content-type", content_type);
+            if authenticated {
+                request = request.header(
+                    "authorization",
+                    format!("Basic {}", STANDARD.encode("test:test-password")),
+                );
+            }
+            let response = app
+                .clone()
+                .oneshot(request.body(Body::from(body)).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), 200);
+            let result: Value =
+                serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
+                    .unwrap();
+            assert_eq!(result["ReaxiumResponse"]["message"], expected);
+            assert_eq!(
+                result["ReaxiumResponse"]["code"],
+                if authenticated { 13 } else { 3 }
+            );
+        }
+    }
+}

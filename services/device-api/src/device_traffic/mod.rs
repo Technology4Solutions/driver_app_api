@@ -1,5 +1,4 @@
 mod broadcast;
-mod json_body;
 pub(crate) use broadcast::traffic_label;
 mod merged;
 mod model;
@@ -8,8 +7,8 @@ mod repository;
 mod vision;
 
 use crate::device_status::{response, Config};
+use crate::json_body::LegacyJson;
 use axum::{extract::rejection::JsonRejection, http::HeaderMap, Extension, Json};
-use json_body::RouteJson;
 pub use model::BeginRoute;
 use serde_json::{json, Value};
 use sqlx::MySqlPool;
@@ -62,7 +61,7 @@ pub async fn begin_route(
     Extension(config): Extension<Arc<Config>>,
     Extension(vision): Extension<Arc<VisionConfig>>,
     headers: HeaderMap,
-    body: Result<RouteJson, JsonRejection>,
+    body: Result<LegacyJson, JsonRejection>,
 ) -> Json<Value> {
     handle(pool, config, vision, headers, body, Action::Begin).await
 }
@@ -73,7 +72,7 @@ pub async fn end_route(
     Extension(config): Extension<Arc<Config>>,
     Extension(vision): Extension<Arc<VisionConfig>>,
     headers: HeaderMap,
-    body: Result<RouteJson, JsonRejection>,
+    body: Result<LegacyJson, JsonRejection>,
 ) -> Json<Value> {
     handle(pool, config, vision, headers, body, Action::End).await
 }
@@ -84,7 +83,7 @@ pub async fn interrupt_route(
     Extension(config): Extension<Arc<Config>>,
     Extension(vision): Extension<Arc<VisionConfig>>,
     headers: HeaderMap,
-    body: Result<RouteJson, JsonRejection>,
+    body: Result<LegacyJson, JsonRejection>,
 ) -> Json<Value> {
     handle(pool, config, vision, headers, body, Action::Interrupt).await
 }
@@ -95,7 +94,7 @@ pub async fn send_traffic(
     Extension(config): Extension<Arc<Config>>,
     Extension(vision): Extension<Arc<VisionConfig>>,
     headers: HeaderMap,
-    body: Result<RouteJson, JsonRejection>,
+    body: Result<LegacyJson, JsonRejection>,
 ) -> Json<Value> {
     handle(pool, config, vision, headers, body, Action::Send(0)).await
 }
@@ -106,7 +105,7 @@ pub async fn send_notification(
     Extension(config): Extension<Arc<Config>>,
     Extension(vision): Extension<Arc<VisionConfig>>,
     headers: HeaderMap,
-    body: Result<RouteJson, JsonRejection>,
+    body: Result<LegacyJson, JsonRejection>,
 ) -> Json<Value> {
     handle(pool, config, vision, headers, body, Action::Notification(0)).await
 }
@@ -117,7 +116,7 @@ pub async fn send_next_stop_notification(
     Extension(config): Extension<Arc<Config>>,
     Extension(vision): Extension<Arc<VisionConfig>>,
     headers: HeaderMap,
-    body: Result<RouteJson, JsonRejection>,
+    body: Result<LegacyJson, JsonRejection>,
 ) -> Json<Value> {
     handle(pool, config, vision, headers, body, Action::NextStop).await
 }
@@ -128,7 +127,7 @@ pub async fn send_skipped_stop_notification(
     Extension(config): Extension<Arc<Config>>,
     Extension(vision): Extension<Arc<VisionConfig>>,
     headers: HeaderMap,
-    body: Result<RouteJson, JsonRejection>,
+    body: Result<LegacyJson, JsonRejection>,
 ) -> Json<Value> {
     handle(pool, config, vision, headers, body, Action::SkippedStop).await
 }
@@ -139,7 +138,7 @@ pub async fn send_manual_skipped_stop_notification(
     Extension(config): Extension<Arc<Config>>,
     Extension(vision): Extension<Arc<VisionConfig>>,
     headers: HeaderMap,
-    body: Result<RouteJson, JsonRejection>,
+    body: Result<LegacyJson, JsonRejection>,
 ) -> Json<Value> {
     handle(
         pool,
@@ -157,7 +156,7 @@ async fn handle(
     config: Arc<Config>,
     vision: Arc<VisionConfig>,
     headers: HeaderMap,
-    body: Result<RouteJson, JsonRejection>,
+    body: Result<LegacyJson, JsonRejection>,
     action: Action,
 ) -> Json<Value> {
     tracing::info!(?action, "route traffic request received");
@@ -170,7 +169,7 @@ async fn handle(
         return response(3, "Invalid Authentication");
     }
     let body = match body {
-        Ok(RouteJson(body)) => body,
+        Ok(LegacyJson(body)) => body,
         Err(error) => {
             let rejection = match &error {
                 JsonRejection::MissingJsonContentType(_) => "missing_or_invalid_content_type",

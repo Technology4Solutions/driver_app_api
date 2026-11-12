@@ -186,7 +186,7 @@ and the Android device format `MM/DD/YYYY HH:MM:SS` (month first). Legacy double
 time separators (`HH::MM::SS`) are also accepted. Optional `users_in_track` is a
 comma-separated string, as in the original route activity DAO.
 
-Route traffic handlers accept repeated `application/json` Content-Type headers,
+Route traffic and UserAccess handlers accept repeated `application/json` Content-Type headers,
 including comma-separated values produced when Apache combines headers from the
 legacy Volley client. Only repeated JSON content types are normalized; authentication,
 strict JSON parsing, payload validation and the request body size limit still apply.
@@ -730,7 +730,10 @@ curl -i -u "$REAXIUM_API_USER:$REAXIUM_API_PASSWORD" \
 
 `POST /UserAccess/executeAnAccessOfAUserInABus` and
 `/school_bus_cloud/UserAccess/executeAnAccessOfAUserInABus` use Basic authentication
-and `ReaxiumParameters.UserAccess`. Required fields are `user_id`, `device_id`,
+and `ReaxiumParameters.UserAccess`. Legacy Volley duplicate JSON content types are
+normalized before strict JSON parsing. Logs identify request arrival, rejection reason,
+and final database/publication status without logging credentials or passenger payloads.
+Required fields are `user_id`, `device_id`,
 `traffic_type`, `access_type`, `traffic_info`, `trace_id`, `latitude`, `longitude`,
 `bus_info` (bus ID), `accessDate`, `stop_id`, `stop_id_by_distance`, `route_id`, and
 `access_situation_id`. Numeric fields accept numeric strings. `accessDate` is a Unix

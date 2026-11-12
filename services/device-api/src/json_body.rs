@@ -7,9 +7,9 @@ use serde_json::Value;
 
 /// Volley 1.0.19 adds its body content type even when the app supplies one.
 /// Apache can combine those duplicate headers into a comma-separated value.
-pub struct RouteJson(pub Value);
+pub struct LegacyJson(pub Value);
 
-impl<S: Send + Sync> FromRequest<S> for RouteJson {
+impl<S: Send + Sync> FromRequest<S> for LegacyJson {
     type Rejection = JsonRejection;
 
     async fn from_request(mut request: Request, state: &S) -> Result<Self, Self::Rejection> {
