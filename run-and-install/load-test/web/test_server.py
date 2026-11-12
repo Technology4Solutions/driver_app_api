@@ -36,7 +36,7 @@ class Tests(unittest.TestCase):
                          date='2026-10-30T08:00:00Z', username='test-user',
                          password='test-password', acknowledge=True)
 
-    def request(self, method='GET', path='/api/config', auth=True, host='dev.example:5665', origin=None, token='csrf'):
+    def request(self, method='GET', path='/api/config', auth=True, host='dev.example:5665', origin=None, token='csrf', public_origin=None):
         headers = [f'{method} {path} HTTP/1.1', f'Host: {host}']
         if auth:
             headers.append('Authorization: Basic ' + base64.b64encode(b'runner:access').decode())
@@ -44,7 +44,7 @@ class Tests(unittest.TestCase):
             headers.append('Origin: ' + origin)
         headers += ['X-Runner-Token: ' + token, 'Content-Length: 2', 'Connection: close']
         connection = Connection(('\r\n'.join(headers) + '\r\n\r\n{}').encode())
-        make_handler(self.runner, 'csrf', 'dev.example', 'access')(connection, ('127.0.0.1', 1234), SimpleNamespace(server_port=5665))
+        make_handler(self.runner, 'csrf', 'dev.example', 'access', public_origin)(connection, ('127.0.0.1', 1234), SimpleNamespace(server_port=5665))
         return bytes(connection.output)
 
     def test_auth_required_for_config_and_page(self):
@@ -68,6 +68,17 @@ class Tests(unittest.TestCase):
         self.assertIn(b'403', self.request('POST', '/api/stop', token='wrong'))
         self.assertIn(b'401', self.request('POST', '/api/stop', auth=False))
         self.assertIn(b'202', self.request('POST', '/api/stop', origin='http://dev.example:5665'))
+
+    def test_https_proxy_origin_keeps_auth_host_and_token_checks(self):
+        public = 'https://dev-driver-app-k6.reaxium.com'
+        for host in ('localhost:5665', 'dev-driver-app-k6.reaxium.com'):
+            self.assertIn(b'202', self.request('POST', '/api/stop', host=host,
+                          origin=public, public_origin=public))
+        self.assertIn(b'403', self.request('POST', '/api/stop', origin=public))
+        self.assertIn(b'403', self.request('POST', '/api/stop', origin='https://attacker.example', public_origin=public))
+        self.assertIn(b'403', self.request('POST', '/api/stop', origin=public, token='wrong', public_origin=public))
+        self.assertIn(b'403', self.request('POST', '/api/stop', origin=public, host='attacker.example', public_origin=public))
+        self.assertIn(b'401', self.request('POST', '/api/stop', origin=public, auth=False, public_origin=public))
 
     def test_validation_does_not_launch(self):
         for changes in ({'vus':2}, {'journeys':0}, {'acknowledge':False}, {'service':'bad'}, {'date':'bad'}):

@@ -170,7 +170,7 @@ class Runner:
                     self.state['status'] = 'stopped'
 
 
-def make_handler(runner, token, public_host=None, access_token=None):
+def make_handler(runner, token, public_host=None, access_token=None, public_origin=None):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
@@ -189,7 +189,10 @@ def make_handler(runner, token, public_host=None, access_token=None):
         def allowed(self):
             host = self.headers.get('Host', '')
             hosts = ['localhost', '127.0.0.1'] + ([public_host] if public_host else [])
-            return host in ['%s:%d' % (name, self.server.server_port) for name in hosts]
+            allowed_hosts = ['%s:%d' % (name, self.server.server_port) for name in hosts]
+            if public_origin:
+                allowed_hosts.append(urlsplit(public_origin).netloc)
+            return host in allowed_hosts
 
         def authenticated(self):
             if access_token is None:
@@ -221,7 +224,10 @@ def make_handler(runner, token, public_host=None, access_token=None):
 
         def do_POST(self):
             origin = self.headers.get('Origin')
-            if not self.allowed() or self.headers.get('X-Runner-Token') != token or (origin and origin != 'http://' + self.headers.get('Host', '')):
+            allowed_origins = ['http://' + self.headers.get('Host', '')]
+            if public_origin:
+                allowed_origins.append(public_origin)
+            if not self.allowed() or self.headers.get('X-Runner-Token') != token or (origin and origin not in allowed_origins):
                 return self.reply(403, {'error': 'Invalid request origin or token'})
             if not self.authenticated():
                 return
@@ -252,6 +258,8 @@ def main():
     parser.add_argument('--bind', choices=['127.0.0.1', '0.0.0.0'], default='127.0.0.1')
     parser.add_argument('--access-token-file', type=Path, help='Persistent browser login password, provisioned by Jenkins')
     parser.add_argument('--public-host', help='Browser-facing IPv4 address or hostname, without scheme or port')
+    parser.add_argument('--public-origin', default=os.environ.get('K6_WEB_PUBLIC_ORIGIN'),
+                        help='Exact browser-facing HTTP(S) origin behind a reverse proxy')
     parser.add_argument('--port', type=int, default=5665)
     parser.add_argument('--api-url', default='http://127.0.0.1:8080')
     parser.add_argument('--env-file', type=Path, default=ROOT.parents[2] / '.env')
@@ -261,6 +269,10 @@ def main():
         parser.error('--public-host is required when binding to 0.0.0.0')
     if args.public_host and not re.fullmatch(r'[A-Za-z0-9.-]+', args.public_host):
         parser.error('--public-host must be an IPv4 address or hostname')
+    if args.public_origin:
+        origin = urlsplit(args.public_origin)
+        if origin.scheme not in ('http', 'https') or not origin.hostname or origin.username or origin.password or origin.path or origin.query or origin.fragment:
+            parser.error('--public-origin must be an HTTP(S) origin without a path, credentials, query or fragment')
     access_token = token_urlsafe(24) if args.bind == '0.0.0.0' else None
     if args.access_token_file:
         access_token = args.access_token_file.read_text().strip()
@@ -273,7 +285,7 @@ def main():
     if args.check_config:
         print('k6 web configuration validated; no server or test started', flush=True)
         return
-    server = ThreadingHTTPServer((args.bind, args.port), make_handler(runner, token_urlsafe(32), args.public_host, access_token))
+    server = ThreadingHTTPServer((args.bind, args.port), make_handler(runner, token_urlsafe(32), args.public_host, access_token, args.public_origin))
     print('k6 control page: http://%s:%d (Ctrl+C to stop)' % (args.public_host or '127.0.0.1', server.server_port), flush=True)
     if access_token:
         if args.access_token_file:

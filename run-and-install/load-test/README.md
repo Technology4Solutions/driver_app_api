@@ -182,6 +182,14 @@ page container with its port published only on localhost. Log in as `runner` usi
 the generated password printed in the terminal. Ctrl+C stops and removes the container.
 No separate Docker commands are needed.
 
+For HTTPS behind Apache, configure the exact browser origin with
+`--public-origin https://dev-driver-app-k6.reaxium.com` (or
+`K6_WEB_PUBLIC_ORIGIN`). Jenkins defaults to this DEV hostname; override
+`K6_WEB_PUBLIC_ORIGIN` when using another hostname. The runner accepts that origin
+with either the proxy's local Host header or the preserved public Host header.
+Browser authentication and the `X-Runner-Token` check remain required. Refresh the
+page after restarting the runner to load its new request token.
+
 Open **http://127.0.0.1:5665**. Select the service, concurrent devices, repetitions,
 simulated date and maximum duration. Enter the API credentials and confirm that
 the target uses a test database. Start with one device and one repetition.

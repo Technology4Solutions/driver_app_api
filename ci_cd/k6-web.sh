@@ -40,6 +40,7 @@ case "$action" in
     identity=(--user "$(id -u):$(id -g)")
     command=("$project_dir/run-and-install/load-test/web/server.py"
              --bind 0.0.0.0 --public-host "$host"
+             --public-origin "${K6_WEB_PUBLIC_ORIGIN:-https://dev-driver-app-k6.reaxium.com}"
              --access-token-file "$project_dir/.k6-web/access-token")
     docker run --rm "${identity[@]}" "${mounts[@]}" "$image" "${command[@]}" --check-config
     docker run --rm "${identity[@]}" --group-add "$(stat -c '%g' /var/run/docker.sock)" \
