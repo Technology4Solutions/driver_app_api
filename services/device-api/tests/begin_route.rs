@@ -98,6 +98,36 @@ fn numeric_strings_and_legacy_date_are_valid_but_missing_fields_are_not() {
     assert!(serde_json::from_value::<BeginRoute>(input).is_err());
 }
 
+#[test]
+fn android_route_dates_match_iso_dates_and_reject_invalid_dates() {
+    let mut input = sample()["ReaxiumParameters"]["DeviceTraffic"].clone();
+    for date in [
+        "2026-11-12 19:24:48",
+        "11/12/2026 19:24:48",
+        "11/12/2026 19::24::48",
+    ] {
+        input["traffic_date"] = json!(date);
+        let request = serde_json::from_value::<BeginRoute>(input.clone()).unwrap();
+        assert!(request.valid(), "rejected {date}");
+        assert_eq!(request.date().unwrap().to_string(), "2026-11-12 19:24:48");
+    }
+    for date in [
+        "02/30/2026 19:24:48",
+        "13/12/2026 19:24:48",
+        "11/12/2026 24:24:48",
+        "11/12/2026",
+        "11/12/2026 19:24:48junk",
+    ] {
+        input["traffic_date"] = json!(date);
+        assert!(
+            !serde_json::from_value::<BeginRoute>(input.clone())
+                .unwrap()
+                .valid(),
+            "accepted {date}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn legacy_volley_duplicate_json_headers_reach_payload_validation() {
     let pool = MySqlPoolOptions::new()

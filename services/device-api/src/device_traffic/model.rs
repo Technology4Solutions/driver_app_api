@@ -29,7 +29,9 @@ pub struct BeginRoute {
 
 impl BeginRoute {
     pub fn date(&self) -> Result<NaiveDateTime, chrono::ParseError> {
-        NaiveDateTime::parse_from_str(&self.traffic_date.replace("::", ":"), "%Y-%m-%d %H:%M:%S")
+        let date = self.traffic_date.replace("::", ":");
+        NaiveDateTime::parse_from_str(&date, "%Y-%m-%d %H:%M:%S")
+            .or_else(|_| NaiveDateTime::parse_from_str(&date, "%m/%d/%Y %H:%M:%S"))
     }
     pub fn valid(&self) -> bool {
         self.device_id > 0

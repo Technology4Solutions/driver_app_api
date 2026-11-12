@@ -181,8 +181,9 @@ failed table and operation. Broadcast failures occur after acknowledgement and d
 `POST /DeviceTraffic/beginARoute` (also `/school_bus_cloud/DeviceTraffic/beginARoute`)
 uses the same `.env` Basic authentication as DeviceStatus. The payload is in
 [`run-and-install/json/begin-route.example.json`](run-and-install/json/begin-route.example.json).
-Numeric fields accept JSON numbers or numeric strings. Dates use `YYYY-MM-DD HH:MM:SS`
-(the legacy `HH::MM::SS` format is also accepted). Optional `users_in_track` is a
+Numeric fields accept JSON numbers or numeric strings. Dates accept `YYYY-MM-DD HH:MM:SS`
+and the Android device format `MM/DD/YYYY HH:MM:SS` (month first). Legacy doubled
+time separators (`HH::MM::SS`) are also accepted. Optional `users_in_track` is a
 comma-separated string, as in the original route activity DAO.
 
 Route traffic handlers accept repeated `application/json` Content-Type headers,
