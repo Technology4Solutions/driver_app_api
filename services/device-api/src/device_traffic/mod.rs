@@ -1,4 +1,5 @@
 mod broadcast;
+mod json_body;
 pub(crate) use broadcast::traffic_label;
 mod merged;
 mod model;
@@ -8,6 +9,7 @@ mod vision;
 
 use crate::device_status::{response, Config};
 use axum::{extract::rejection::JsonRejection, http::HeaderMap, Extension, Json};
+use json_body::RouteJson;
 pub use model::BeginRoute;
 use serde_json::{json, Value};
 use sqlx::MySqlPool;
@@ -60,7 +62,7 @@ pub async fn begin_route(
     Extension(config): Extension<Arc<Config>>,
     Extension(vision): Extension<Arc<VisionConfig>>,
     headers: HeaderMap,
-    body: Result<Json<Value>, JsonRejection>,
+    body: Result<RouteJson, JsonRejection>,
 ) -> Json<Value> {
     handle(pool, config, vision, headers, body, Action::Begin).await
 }
@@ -71,7 +73,7 @@ pub async fn end_route(
     Extension(config): Extension<Arc<Config>>,
     Extension(vision): Extension<Arc<VisionConfig>>,
     headers: HeaderMap,
-    body: Result<Json<Value>, JsonRejection>,
+    body: Result<RouteJson, JsonRejection>,
 ) -> Json<Value> {
     handle(pool, config, vision, headers, body, Action::End).await
 }
@@ -82,7 +84,7 @@ pub async fn interrupt_route(
     Extension(config): Extension<Arc<Config>>,
     Extension(vision): Extension<Arc<VisionConfig>>,
     headers: HeaderMap,
-    body: Result<Json<Value>, JsonRejection>,
+    body: Result<RouteJson, JsonRejection>,
 ) -> Json<Value> {
     handle(pool, config, vision, headers, body, Action::Interrupt).await
 }
@@ -93,7 +95,7 @@ pub async fn send_traffic(
     Extension(config): Extension<Arc<Config>>,
     Extension(vision): Extension<Arc<VisionConfig>>,
     headers: HeaderMap,
-    body: Result<Json<Value>, JsonRejection>,
+    body: Result<RouteJson, JsonRejection>,
 ) -> Json<Value> {
     handle(pool, config, vision, headers, body, Action::Send(0)).await
 }
@@ -104,7 +106,7 @@ pub async fn send_notification(
     Extension(config): Extension<Arc<Config>>,
     Extension(vision): Extension<Arc<VisionConfig>>,
     headers: HeaderMap,
-    body: Result<Json<Value>, JsonRejection>,
+    body: Result<RouteJson, JsonRejection>,
 ) -> Json<Value> {
     handle(pool, config, vision, headers, body, Action::Notification(0)).await
 }
@@ -115,7 +117,7 @@ pub async fn send_next_stop_notification(
     Extension(config): Extension<Arc<Config>>,
     Extension(vision): Extension<Arc<VisionConfig>>,
     headers: HeaderMap,
-    body: Result<Json<Value>, JsonRejection>,
+    body: Result<RouteJson, JsonRejection>,
 ) -> Json<Value> {
     handle(pool, config, vision, headers, body, Action::NextStop).await
 }
@@ -126,7 +128,7 @@ pub async fn send_skipped_stop_notification(
     Extension(config): Extension<Arc<Config>>,
     Extension(vision): Extension<Arc<VisionConfig>>,
     headers: HeaderMap,
-    body: Result<Json<Value>, JsonRejection>,
+    body: Result<RouteJson, JsonRejection>,
 ) -> Json<Value> {
     handle(pool, config, vision, headers, body, Action::SkippedStop).await
 }
@@ -137,7 +139,7 @@ pub async fn send_manual_skipped_stop_notification(
     Extension(config): Extension<Arc<Config>>,
     Extension(vision): Extension<Arc<VisionConfig>>,
     headers: HeaderMap,
-    body: Result<Json<Value>, JsonRejection>,
+    body: Result<RouteJson, JsonRejection>,
 ) -> Json<Value> {
     handle(
         pool,
@@ -155,20 +157,44 @@ async fn handle(
     config: Arc<Config>,
     vision: Arc<VisionConfig>,
     headers: HeaderMap,
-    body: Result<Json<Value>, JsonRejection>,
+    body: Result<RouteJson, JsonRejection>,
     action: Action,
 ) -> Json<Value> {
     tracing::info!(?action, "route traffic request received");
     if !config.authorized(&headers) {
-        tracing::warn!(?action, reason = "authentication", "route traffic request rejected");
+        tracing::warn!(
+            ?action,
+            reason = "authentication",
+            "route traffic request rejected"
+        );
         return response(3, "Invalid Authentication");
     }
-    let Ok(Json(body)) = body else {
-        tracing::warn!(?action, reason = "json_body", "route traffic request rejected");
-        return response(3, "Invalid Json Object");
+    let body = match body {
+        Ok(RouteJson(body)) => body,
+        Err(error) => {
+            let rejection = match &error {
+                JsonRejection::MissingJsonContentType(_) => "missing_or_invalid_content_type",
+                JsonRejection::JsonSyntaxError(_) => "invalid_json_syntax",
+                JsonRejection::JsonDataError(_) => "invalid_json_data",
+                JsonRejection::BytesRejection(_) => "body_read_or_size_limit",
+                _ => "unknown_json_rejection",
+            };
+            tracing::warn!(
+                ?action,
+                reason = "json_body",
+                rejection,
+                status = error.status().as_u16(),
+                "route traffic request rejected"
+            );
+            return response(3, "Invalid Json Object");
+        }
     };
     let Some(parameters) = body.get("ReaxiumParameters") else {
-        tracing::warn!(?action, reason = "missing_ReaxiumParameters", "route traffic request rejected");
+        tracing::warn!(
+            ?action,
+            reason = "missing_ReaxiumParameters",
+            "route traffic request rejected"
+        );
         return response(3, "Invalid Json Header");
     };
     let request = if matches!(
@@ -203,10 +229,14 @@ async fn handle(
     };
     if let Some(r) = &request {
         tracing::info!(
-            ?action, device_id = r.device_id, route_id = r.route_id,
-            valid_device = r.device_id > 0, valid_stop = r.stop_id > 0,
+            ?action,
+            device_id = r.device_id,
+            route_id = r.route_id,
+            valid_device = r.device_id > 0,
+            valid_stop = r.stop_id > 0,
             valid_route = r.route_id > 0 && r.route_id <= u32::MAX as i64,
-            valid_driver = r.driver_id > 0, has_trace = !r.trace_id.trim().is_empty(),
+            valid_driver = r.driver_id > 0,
+            has_trace = !r.trace_id.trim().is_empty(),
             valid_bus_id = r.bus_info.trim().parse::<u64>().is_ok_and(|id| id > 0),
             valid_latitude = (-90.0..=90.0).contains(&r.latitude),
             valid_longitude = (-180.0..=180.0).contains(&r.longitude),
@@ -230,7 +260,11 @@ async fn handle(
                 _ => r.traffic_situation_id.is_some_and(|id| id > 0),
             }
     }) else {
-        tracing::warn!(?action, reason = "invalid_parameters", "route traffic request rejected");
+        tracing::warn!(
+            ?action,
+            reason = "invalid_parameters",
+            "route traffic request rejected"
+        );
         return response(
             3,
             "Invalid Parameters received, please checkout the api documentation",

@@ -99,6 +99,105 @@ fn numeric_strings_and_legacy_date_are_valid_but_missing_fields_are_not() {
 }
 
 #[tokio::test]
+async fn legacy_volley_duplicate_json_headers_reach_payload_validation() {
+    let pool = MySqlPoolOptions::new()
+        .connect_lazy("mysql://unused:unused@127.0.0.1:1/unused")
+        .unwrap();
+    let app = make_app(pool, "http://127.0.0.1:1", None);
+    // Invalid latitude ensures successful JSON decoding stops before DB access.
+    let mut input = sample();
+    input["ReaxiumParameters"]["DeviceTraffic"]["latitude"] = json!(91);
+    for path in [
+        "/DeviceTraffic/beginARoute",
+        "/school_bus_cloud/DeviceTraffic/beginARoute",
+    ] {
+        for content_types in [
+            vec!["application/json; charset=UTF-8"],
+            vec![
+                "application/json; charset=UTF-8",
+                "application/json; charset=utf-8",
+            ],
+            vec!["application/json; charset=UTF-8, application/json; charset=utf-8"],
+        ] {
+            let mut request = Request::post(path).header(
+                "authorization",
+                format!("Basic {}", STANDARD.encode("test:test-password")),
+            );
+            for content_type in content_types {
+                request = request.header("content-type", content_type);
+            }
+            let response = app
+                .clone()
+                .oneshot(request.body(Body::from(input.to_string())).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), 200);
+            let result: Value =
+                serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
+                    .unwrap();
+            assert!(result["ReaxiumResponse"]["message"]
+                .as_str()
+                .unwrap()
+                .starts_with("Invalid Parameters"));
+        }
+    }
+}
+
+#[tokio::test]
+async fn legacy_json_header_compatibility_preserves_auth_parser_and_size_limit() {
+    let pool = MySqlPoolOptions::new()
+        .connect_lazy("mysql://unused:unused@127.0.0.1:1/unused")
+        .unwrap();
+    let app = make_app(pool, "http://127.0.0.1:1", None);
+    for (content_type, body, authenticated, expected) in [
+        (
+            "application/json, application/json",
+            "{}".to_owned(),
+            false,
+            "Invalid Authentication",
+        ),
+        (
+            "application/json, application/json",
+            "{".to_owned(),
+            true,
+            "Invalid Json Object",
+        ),
+        (
+            "application/json, text/plain",
+            "{}".to_owned(),
+            true,
+            "Invalid Json Object",
+        ),
+        ("text/plain", "{}".to_owned(), true, "Invalid Json Object"),
+        (
+            "application/json, application/json",
+            " ".repeat(2 * 1024 * 1024 + 1),
+            true,
+            "Invalid Json Object",
+        ),
+    ] {
+        let mut request =
+            Request::post("/DeviceTraffic/beginARoute").header("content-type", content_type);
+        if authenticated {
+            request = request.header(
+                "authorization",
+                format!("Basic {}", STANDARD.encode("test:test-password")),
+            );
+        }
+        let response = app
+            .clone()
+            .oneshot(request.body(Body::from(body)).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        let result: Value =
+            serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        assert_eq!(result["ReaxiumResponse"]["message"], expected);
+    }
+}
+
+#[tokio::test]
 #[ignore = "requires disposable TEST_DATABASE_URL named device_api_migration_test"]
 async fn saves_broadcasts_sends_udp_and_reports_rollback_and_partial_failure() {
     let pool = MySqlPoolOptions::new()

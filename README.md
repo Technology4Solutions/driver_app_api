@@ -185,6 +185,13 @@ Numeric fields accept JSON numbers or numeric strings. Dates use `YYYY-MM-DD HH:
 (the legacy `HH::MM::SS` format is also accepted). Optional `users_in_track` is a
 comma-separated string, as in the original route activity DAO.
 
+Route traffic handlers accept repeated `application/json` Content-Type headers,
+including comma-separated values produced when Apache combines headers from the
+legacy Volley client. Only repeated JSON content types are normalized; authentication,
+strict JSON parsing, payload validation and the request body size limit still apply.
+Rejected bodies log a category (`missing_or_invalid_content_type`, `invalid_json_syntax`,
+`invalid_json_data`, or `body_read_or_size_limit`) without logging credentials or payloads.
+
 The handler inserts `device_traffic` with type **3** (route start), situation **1**,
 a snapshot of the stop number/name, and the bus number looked up using the request’s
 `bus_info` as `bus.bus_id`. It inserts
