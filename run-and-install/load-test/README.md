@@ -119,10 +119,24 @@ SERVICE=endARoute VUS=1 JOURNEYS=1 ./load-test/start.sh
 ```
 
 `SERVICE=startARoute` is also accepted as an alias for `beginARoute`.
-`SERVICE=journey` (the default) calls both endpoints. In single-service mode,
+`SERVICE=journey` (the default) calls both endpoints. For single-endpoint services,
 JOURNEYS means repetitions per device: VUS=8 JOURNEYS=10 sends 80 requests to only
 the selected endpoint. The summary shows `service_iterations_completed`, not
 `journeys_completed`. All response checks and failure thresholds remain active.
+
+Passenger access is a trip scenario: selecting `executeAnAccessOfAUserInABus`
+automatically sends `beginARoute → executeAnAccessOfAUserInABus → endARoute`.
+Each repetition uses one device, route and trace ID across all three requests.
+The exported passenger must belong to that route. For example, 8 devices and 10
+repetitions send 240 requests (80 passenger events and 160 route events).
+The web selector shows this sequence and request count. The test ends each route
+after its passenger event, so routes are not left running on the dashboard.
+
+The simulated start is New York wall time. Passenger `accessDate` milliseconds are
+converted to the corresponding instant, so their stored local time lies between
+the start and end events rather than shifting by four or five hours. Passenger
+tests support dates from 2007 onward and reject ambiguous/nonexistent DST times
+before sending that iteration's requests.
 
 Begin-only tests leave device activity rows in the test database. End-only tests
 clear the selected devices' activity rows and are allowed even without an existing

@@ -57,7 +57,9 @@ export default function () {
   const iteration = exec.vu.iterationInScenario;
   const start = dateBase + iteration * Math.max(120000, steps.length * 60000);
   const trace = `load-${__ENV.RUN_ID}-${exec.vu.idInTest}-${iteration}`;
-  steps.forEach((action, index) => post(action, payload(action, d, start + index * 60000, trace), d));
+  // Build the complete trip before writing, including date validation.
+  const events = steps.map((action, index) => [action, payload(action, d, start + index * 60000, trace)]);
+  events.forEach(([action, data]) => post(action, data, d));
   completed.add(1);
   sleep(0.1);
 }

@@ -29,6 +29,7 @@ docker run --rm --network host --user "$(id -u):$(id -g)" \
 case "$SERVICE" in
   deviceStatus) service_label='device/DeviceStatus/update' ;;
   journey) service_label='beginARoute + endARoute (journey)' ;;
+  executeAnAccessOfAUserInABus) service_label='beginARoute + passenger access + endARoute' ;;
   *) service_label="$SERVICE" ;;
 esac
 printf '\nTest service: %s\nDevices: %s | Iterations per device: %s\nExit code: %s\n' \

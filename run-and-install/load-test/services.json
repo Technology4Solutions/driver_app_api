@@ -60,9 +60,14 @@
     "namespace": "Notification"
   },
   "executeAnAccessOfAUserInABus": {
-    "label": "Passenger bus access",
+    "label": "Passenger trip \u00b7 begin + access + end",
     "path": "/UserAccess/executeAnAccessOfAUserInABus",
-    "namespace": "UserAccess"
+    "namespace": "UserAccess",
+    "steps": [
+      "beginARoute",
+      "executeAnAccessOfAUserInABus",
+      "endARoute"
+    ]
   },
   "journey": {
     "label": "Journey \u00b7 begin + end route",

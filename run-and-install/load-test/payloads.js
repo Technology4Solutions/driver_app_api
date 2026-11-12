@@ -1,5 +1,20 @@
 // Pure request builders, shared by every k6 scenario.
 export function date(ms) { return new Date(ms).toISOString().slice(0, 19).replace('T', ' '); }
+// START_DATE represents device wall time, even though its carrier string ends in Z.
+// UserAccess requires an actual epoch; the backend converts it to New York time.
+export function accessTimestamp(wallMs) {
+  const year = new Date(wallMs).getUTCFullYear();
+  if (!Number.isFinite(wallMs) || year < 2007 || year > 9999) throw new Error('Passenger tests require a simulated date from 2007 onward');
+  const firstSunday = month => 1 + (7 - new Date(Date.UTC(year, month, 1)).getUTCDay()) % 7;
+  const spring = Date.UTC(year, 2, firstSunday(2) + 7, 2);
+  const fall = Date.UTC(year, 10, firstSunday(10), 2);
+  const hour = 3600000;
+  if ((wallMs >= spring && wallMs < spring + hour) || (wallMs >= fall - hour && wallMs < fall)) {
+    throw new Error('Passenger test time is ambiguous or nonexistent in America/New_York');
+  }
+  const daylight = wallMs >= spring + hour && wallMs < fall - hour;
+  return wallMs + (daylight ? 4 : 5) * hour;
+}
 export function mergedIds(device) {
   const value = device.route_ids;
   return Array.isArray(value) ? value.map(Number) : String(value || '').split(',').filter(Boolean).map(Number);
@@ -32,7 +47,7 @@ export function payload(action, d, start, trace) {
   if (action === 'executeAnAccessOfAUserInABus') {
     const {driver_id, ...access} = common;
     return {...access, user_id: Number(d.passenger_id), access_type: Number(d.access_type), traffic_type: 1,
-      traffic_info: 'k6 passenger boarding', accessDate: start, stop_id_by_distance: common.stop_id, access_situation_id: 1};
+      traffic_info: 'k6 passenger boarding', accessDate: accessTimestamp(start), stop_id_by_distance: common.stop_id, access_situation_id: 1};
   }
   if (action.startsWith('send') && action !== 'sendTraffic') {
     if (action === 'sendManualSkippedStopNotification') return {...common, traffic_date: date(start)};

@@ -70,13 +70,23 @@ try:
             env['SERVICE'] = service
             result = subprocess.run([str(Path(__file__).with_name('run.sh').resolve()),str(fixture)],env=env,text=True,capture_output=True,timeout=90)
             assert result.returncode == 0, result.stdout + result.stderr
-            assert len(records) == 4 * (13 if service == 'allServices' else 1), (service, len(records))
             endpoint = 'beginARoute' if service == 'startARoute' else service
             expected_steps = catalog[service].get('steps', [endpoint]) if service != 'startARoute' else [endpoint]
             expected_paths = [catalog[step]['path'] for step in expected_steps]
+            assert len(records) == 4 * len(expected_steps), (service, len(records))
             assert set(path for path, _ in records) == set(expected_paths)
             for trace in {p['trace_id'] for _, p in records}:
                 assert [path for path, p in records if p['trace_id'] == trace] == expected_paths
+            if service == 'executeAnAccessOfAUserInABus':
+                from datetime import datetime
+                from zoneinfo import ZoneInfo
+                for trace in {p['trace_id'] for _, p in records}:
+                    events = [p for _, p in records if p['trace_id'] == trace]
+                    begin, access, end = events
+                    assert len({p['device_id'] for p in events}) == 1
+                    assert len({p['route_id'] for p in events}) == 1
+                    local_access = datetime.fromtimestamp(access['accessDate'] / 1000, ZoneInfo('America/New_York')).strftime('%Y-%m-%d %H:%M:%S')
+                    assert begin['traffic_date'] < local_access < end['traffic_date']
             if service == 'deviceStatus':
                 assert all('device_imei' in payload and 'device_location' in payload and 'device_status' in payload for _,payload in records)
             assert len({payload['trace_id'] for _,payload in records}) == 4
