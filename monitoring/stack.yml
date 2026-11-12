@@ -8,6 +8,7 @@ services:
       - ${MONITORING_DIR}/alerts.yml:/etc/prometheus/alerts.yml:ro
       - prometheus-data:/prometheus
     networks: [monitoring, api]
+    stop_grace_period: 60s
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:9090/-/ready"]
       interval: 5s
@@ -15,6 +16,14 @@ services:
       retries: 20
     deploy:
       replicas: 1
+      # Only one Prometheus process may open the shared TSDB volume.
+      update_config:
+        parallelism: 1
+        order: stop-first
+        failure_action: pause
+      rollback_config:
+        parallelism: 1
+        order: stop-first
       placement:
         constraints: ["node.id == ${MONITORING_NODE_ID}"]
       restart_policy: {condition: on-failure}

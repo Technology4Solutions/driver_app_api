@@ -9,6 +9,7 @@ on_exit() {
   local status=$?
   if ((status != 0)) && [[ "$action" == start ]]; then
     docker stack ps --no-trunc "$monitoring_stack" >&2 || true
+    docker service logs --timestamps --since 5m --tail 80 "${monitoring_stack}_prometheus" >&2 || true
   fi
 }
 trap on_exit EXIT

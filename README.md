@@ -572,6 +572,12 @@ Prometheus and Grafana are pinned to the deployment manager, where their files
 and persistent volumes live. Readiness requires healthy containers. Configuration
 is reapplied on every deployment; no Slack webhook is required.
 
+Prometheus updates and rollbacks stop the old task before starting its replacement,
+with a 60-second shutdown grace period. This prevents two tasks from opening the
+same metrics volume and failing with `lock DB directory: resource temporarily unavailable`.
+The volume and stored metrics are retained. Failed monitoring deployments also print
+recent Prometheus logs to Jenkins.
+
 Prometheus discovers all API replicas on internal port 9090 and retains 15 days
 of metrics. CPU is measured per process (100% = one core); resident memory is API
 process memory, not total host/container memory. Build a new API image to include
