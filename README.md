@@ -186,7 +186,7 @@ and the Android device format `MM/DD/YYYY HH:MM:SS` (month first). Legacy double
 time separators (`HH::MM::SS`) are also accepted. Optional `users_in_track` is a
 comma-separated string, as in the original route activity DAO.
 
-Route traffic and UserAccess handlers accept repeated `application/json` Content-Type headers,
+DeviceStatus, route traffic and UserAccess handlers accept repeated `application/json` Content-Type headers,
 including comma-separated values produced when Apache combines headers from the
 legacy Volley client. Only repeated JSON content types are normalized; authentication,
 strict JSON parsing, payload validation and the request body size limit still apply.

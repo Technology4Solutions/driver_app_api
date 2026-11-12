@@ -398,3 +398,115 @@ async fn queues_filters_persists_and_broadcasts_like_java() {
     server.abort();
     pool.close().await;
 }
+
+#[tokio::test]
+async fn legacy_status_headers_reach_queueing_and_preserve_rejections() {
+    use std::io::Write;
+    use std::sync::Mutex;
+    use tracing::instrument::WithSubscriber;
+
+    #[derive(Clone)]
+    struct Capture(Arc<Mutex<Vec<u8>>>);
+    impl Write for Capture {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().write(bytes)
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let app = app(lazy_pool(), config("http://127.0.0.1:1"));
+    for path in [
+        "/device/DeviceStatus/update",
+        "/api/DeviceStatus/updateStatus",
+    ] {
+        for (content_types, payload, auth, expected_log, code) in [
+            (
+                vec!["application/json; charset=UTF-8"],
+                sample().to_string(),
+                true,
+                "queue publisher unavailable",
+                500,
+            ),
+            (
+                vec![
+                    "application/json; charset=UTF-8",
+                    "application/json; charset=utf-8",
+                ],
+                sample().to_string(),
+                true,
+                "queue publisher unavailable",
+                500,
+            ),
+            (
+                vec!["application/json; charset=UTF-8, application/json; charset=utf-8"],
+                sample().to_string(),
+                true,
+                "queue publisher unavailable",
+                500,
+            ),
+            (
+                vec!["application/json, application/json"],
+                "{".to_owned(),
+                true,
+                "invalid_json_syntax",
+                500,
+            ),
+            (
+                vec!["text/plain"],
+                sample().to_string(),
+                true,
+                "missing_or_invalid_content_type",
+                500,
+            ),
+            (
+                vec!["application/json, application/json"],
+                " ".repeat(2 * 1024 * 1024 + 1),
+                true,
+                "body_read_or_size_limit",
+                500,
+            ),
+            (
+                vec!["application/json, application/json"],
+                sample().to_string(),
+                false,
+                "invalid authentication",
+                3,
+            ),
+        ] {
+            let capture = Capture(Arc::new(Mutex::new(Vec::new())));
+            let output = capture.0.clone();
+            let subscriber = tracing_subscriber::fmt()
+                .without_time()
+                .with_ansi(false)
+                .with_writer(move || capture.clone())
+                .finish();
+            let mut request = Request::post(path);
+            for content_type in content_types {
+                request = request.header("content-type", content_type);
+            }
+            if auth {
+                request = request.header("authorization", authorization("api:password"));
+            }
+            let response = app
+                .clone()
+                .oneshot(request.body(Body::from(payload)).unwrap())
+                .with_subscriber(subscriber)
+                .await
+                .unwrap();
+            assert_eq!(response.status(), if auth { 400 } else { 200 });
+            let body: Value =
+                serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
+                    .unwrap();
+            assert_eq!(body["ReaxiumResponse"]["code"], code);
+            // The response envelope is intentionally the same for parse and broker
+            // errors. Logs prove a valid legacy request reached the queue stage.
+            let logs = String::from_utf8(output.lock().unwrap().clone()).unwrap();
+            assert!(
+                logs.contains(expected_log),
+                "expected {expected_log}, got {logs}"
+            );
+        }
+    }
+}

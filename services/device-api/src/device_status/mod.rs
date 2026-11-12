@@ -5,6 +5,7 @@ pub(crate) mod model;
 pub mod queue;
 mod repository;
 
+use crate::json_body::LegacyJson;
 use axum::{extract::rejection::JsonRejection, http::HeaderMap, Extension, Json};
 use base64::{engine::general_purpose::STANDARD, Engine};
 pub use model::Update;
@@ -95,8 +96,9 @@ pub async fn update(
     publisher: Option<Extension<queue::Publisher>>,
     Extension(config): Extension<Arc<Config>>,
     headers: HeaderMap,
-    body: Result<Json<Value>, JsonRejection>,
+    body: Result<LegacyJson, JsonRejection>,
 ) -> (axum::http::StatusCode, Json<Value>) {
+    tracing::info!("device status request received");
     // Legacy clients inspect the envelope code, including for failures (HTTP 200).
     if !config.authorized(&headers) {
         tracing::warn!("device status rejected: invalid authentication; no data written");
@@ -105,12 +107,26 @@ pub async fn update(
             response(3, "Invalid Authentication"),
         );
     }
-    let Ok(Json(body)) = body else {
-        tracing::warn!("device status rejected: invalid JSON; no data written");
-        return (
-            axum::http::StatusCode::BAD_REQUEST,
-            response(500, "Error reporting device status"),
-        );
+    let body = match body {
+        Ok(LegacyJson(body)) => body,
+        Err(error) => {
+            let rejection = match &error {
+                JsonRejection::MissingJsonContentType(_) => "missing_or_invalid_content_type",
+                JsonRejection::JsonSyntaxError(_) => "invalid_json_syntax",
+                JsonRejection::JsonDataError(_) => "invalid_json_data",
+                JsonRejection::BytesRejection(_) => "body_read_or_size_limit",
+                _ => "unknown_json_rejection",
+            };
+            tracing::warn!(
+                rejection,
+                status = error.status().as_u16(),
+                "device status rejected: invalid JSON; no data written"
+            );
+            return (
+                axum::http::StatusCode::BAD_REQUEST,
+                response(500, "Error reporting device status"),
+            );
+        }
     };
     let Some(parameters) = body.get("ReaxiumParameters") else {
         tracing::warn!("device status rejected: missing ReaxiumParameters; no data written");
@@ -130,17 +146,22 @@ pub async fn update(
             response(500, "Error reporting device status"),
         );
     };
+    tracing::info!("device status payload validated");
     let Some(Extension(publisher)) = publisher else {
+        tracing::warn!("device status queue publisher unavailable; no message queued");
         return (
             axum::http::StatusCode::BAD_REQUEST,
             response(500, "Error reporting device status"),
         );
     };
     match publisher.publish(&body).await {
-        Ok(()) => (
-            axum::http::StatusCode::OK,
-            response(0, "Device Status queued"),
-        ),
+        Ok(()) => {
+            tracing::info!("device status message queued; database processing is asynchronous");
+            (
+                axum::http::StatusCode::OK,
+                response(0, "Device Status queued"),
+            )
+        }
         Err(error) => {
             tracing::error!(%error, "Error queueing Device Status");
             (
