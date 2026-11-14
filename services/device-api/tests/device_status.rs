@@ -403,19 +403,38 @@ async fn queues_filters_persists_and_broadcasts_like_java() {
 async fn legacy_status_headers_reach_queueing_and_preserve_rejections() {
     use std::io::Write;
     use std::sync::Mutex;
-    use tracing::instrument::WithSubscriber;
 
     #[derive(Clone)]
-    struct Capture(Arc<Mutex<Vec<u8>>>);
+    struct Capture(Arc<Mutex<Vec<u8>>>, std::thread::ThreadId);
     impl Write for Capture {
         fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            self.0.lock().unwrap().write(bytes)
+            if std::thread::current().id() == self.1 {
+                self.0.lock().unwrap().write(bytes)
+            } else {
+                Ok(bytes.len())
+            }
         }
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
         }
     }
 
+    // Keep one subscriber installed for the whole test. Replacing a scoped
+    // subscriber per request races tracing's callsite interest cache while the
+    // other tests execute the same handler without a subscriber.
+    // This tokio test uses the current-thread runtime. Ignore parallel tests'
+    // output so another request cannot satisfy this test's log assertions.
+    let capture = Capture(
+        Arc::new(Mutex::new(Vec::new())),
+        std::thread::current().id(),
+    );
+    let output = capture.0.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_writer(move || capture.clone())
+        .finish();
+    tracing::subscriber::set_global_default(subscriber).unwrap();
     let app = app(lazy_pool(), config("http://127.0.0.1:1"));
     for path in [
         "/device/DeviceStatus/update",
@@ -475,13 +494,7 @@ async fn legacy_status_headers_reach_queueing_and_preserve_rejections() {
                 3,
             ),
         ] {
-            let capture = Capture(Arc::new(Mutex::new(Vec::new())));
-            let output = capture.0.clone();
-            let subscriber = tracing_subscriber::fmt()
-                .without_time()
-                .with_ansi(false)
-                .with_writer(move || capture.clone())
-                .finish();
+            output.lock().unwrap().clear();
             let mut request = Request::post(path);
             for content_type in content_types {
                 request = request.header("content-type", content_type);
@@ -492,7 +505,6 @@ async fn legacy_status_headers_reach_queueing_and_preserve_rejections() {
             let response = app
                 .clone()
                 .oneshot(request.body(Body::from(payload)).unwrap())
-                .with_subscriber(subscriber)
                 .await
                 .unwrap();
             assert_eq!(response.status(), if auth { 400 } else { 200 });
