@@ -37,12 +37,30 @@ case "$action" in
     done
     ;;
   start)
+    # Drain the existing singleton before stack deploy or a forced restart can
+    # create another writer. This also recovers an update paused on a TSDB lock.
+    prometheus_service="${monitoring_stack}_prometheus"
+    if docker service inspect "$prometheus_service" >/dev/null 2>&1; then
+      docker service scale --detach=true "$prometheus_service=0"
+      drained=false
+      for ((attempt=0;attempt<60;attempt++)); do
+        containers=$(docker ps -q --filter "label=com.docker.swarm.service.name=$prometheus_service")
+        if [[ -z "$containers" ]]; then drained=true; break; fi
+        sleep 2
+      done
+      $drained || { echo 'Prometheus did not stop; refusing to start another TSDB writer' >&2; exit 1; }
+    fi
+    owners=$(docker ps -q --filter volume=driver-api-monitoring_prometheus-data)
+    if [[ -n "$owners" ]]; then
+      echo "Prometheus data volume is still used by container(s): $owners. Stop the competing monitoring instance before retrying; keep the volume." >&2
+      exit 1
+    fi
     sed "s/tasks.driver_app_api_stack_driver-app-api/tasks.${stack}_driver-app-api/" \
       monitoring/prometheus.swarm.yml > monitoring/prometheus.generated.yml
     docker stack deploy --with-registry-auth --resolve-image always "${stack_files[@]}" "$monitoring_stack"
     # Bind-mounted provisioning files are re-read at process startup.
     for component in prometheus grafana; do
-      docker service update --detach=true --force "${monitoring_stack}_${component}"
+      docker service update --detach=true --update-order stop-first --rollback-order stop-first --force "${monitoring_stack}_${component}"
     done
     for ((i=0;i<60;i++)); do
       ready=true

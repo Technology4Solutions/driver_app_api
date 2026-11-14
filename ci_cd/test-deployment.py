@@ -151,7 +151,13 @@ if os.getenv('MOCK_NO_STACK_CONFIG') and a[:2]==['stack','config']:sys.exit(125)
 if os.getenv('MOCK_PULL_FAIL') and a[0]=='pull':sys.exit(1)
 if os.getenv('MOCK_SECRET_MISSING') and a[:2]==['secret','inspect']:sys.exit(1)
 if os.getenv('MOCK_MONITORING_FAIL') and a[:2]==['stack','deploy'] and a[-1].endswith('_monitoring'):sys.exit(1)
-if a[0]=='ps':print('mock-container')
+drain=Path(os.environ['MOCK_LOG']+'.draining')
+if a[:2]==['service','scale']:drain.touch()
+if a[:2]==['stack','deploy'] and drain.exists():drain.unlink()
+if a[0]=='ps':
+ if any('volume=' in x for x in a):
+  if os.getenv('MOCK_VOLUME_BUSY'):print('competing-prometheus')
+ elif not (drain.exists() and any('_monitoring_prometheus' in x for x in a)):print('mock-container')
 if a[0]=='inspect':print('healthy')
 if os.getenv('MOCK_DEPENDENCY_PAUSED') and a[:2]==['service','inspect'] and a[-1].endswith('driver-app-rabbitmq'):print('paused');sys.exit(0)
 if a[:2]==['service','ls'] and not any('_monitoring' in x for x in a) and not os.getenv('MOCK_EMPTY_STACK'):print('driver_app_api_stack_driver-app-api')
@@ -252,6 +258,25 @@ if a[:2]==['service','inspect'] and '--format' in a:
         calls = self.log.read_text()
         self.assertIn('stack rm driver_app_api_stack_monitoring', calls)
         self.assertNotIn('--volumes', calls)
+
+    def test_monitoring_drains_prometheus_before_replacement(self):
+        result = self.run_script('monitoring.sh', 'start')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.log.read_text()
+        drained = calls.index('service scale --detach=true driver_app_api_stack_monitoring_prometheus=0')
+        stopped = calls.index('ps -q --filter label=com.docker.swarm.service.name=driver_app_api_stack_monitoring_prometheus', drained)
+        deployed = calls.index('stack deploy --with-registry-auth')
+        self.assertLess(drained, stopped)
+        self.assertLess(stopped, deployed)
+        self.assertIn('--update-order stop-first --rollback-order stop-first --force', calls)
+        self.assertNotIn('volume rm', calls)
+
+    def test_monitoring_refuses_competing_volume_owner(self):
+        result = self.run_script('monitoring.sh', 'start', MOCK_VOLUME_BUSY='1')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('competing-prometheus', result.stderr)
+        self.assertNotIn('stack deploy --with-registry-auth', self.log.read_text())
+        self.assertNotIn('volume rm', self.log.read_text())
 
     def test_paused_monitoring_fails_with_task_diagnostics(self):
         result = self.run_script('monitoring.sh', 'start', MOCK_MONITORING_PAUSED='1')
