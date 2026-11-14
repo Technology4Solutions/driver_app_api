@@ -35,7 +35,7 @@ function estimate() {
   if (selected) {
     details.push(selected.steps ? steps.map(step => services[step].path).join(' → ') : selected.path);
     if (steps.some(step => step.includes('Merge'))) details.push('Dataset needs at least two related routes per device.');
-    if (steps.includes('executeAnAccessOfAUserInABus')) details.push('Each repetition needs a different passenger (users.user_type_id = 2) with a matching access method. Data is refreshed and checked automatically before k6 starts.');
+    if (steps.includes('executeAnAccessOfAUserInABus')) details.push('Repetitions cycle through valid route passengers (users.user_type_id = 2) with matching access methods. Data is refreshed and checked automatically before k6 starts.');
     if (steps.includes('deviceStatus')) details.push('DeviceStatus success confirms queue acceptance; persistence happens asynchronously.');
   }
   $('service-details').textContent = details.join(' ');

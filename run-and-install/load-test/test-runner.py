@@ -98,13 +98,32 @@ try:
             assert 'service_iterations_completed' in result.stdout
             assert 'journeys_completed' not in result.stdout
             print(f'PASS: {service}')
+        original_fixture = fixture.read_text()
+        template = json.loads(original_fixture)[0]
+        fixture.write_text(json.dumps([dict(template, device_id=i, passengers=[dict(passenger_id=10, access_type=3)]) for i in range(1, 9)]))
+        env.update(VUS='8', JOURNEYS='100')
+        for service in ('beginRouteAccess', 'allServices'):
+            records.clear()
+            env['SERVICE'] = service
+            result = subprocess.run([str(Path(__file__).with_name('run.sh').resolve()), str(fixture)], env=env, text=True, capture_output=True, timeout=90)
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert len(records) == 800 * len(catalog[service]['steps'])
+            assert len({p['trace_id'] for _, p in records}) == 800
+            passenger_events = [p for path, p in records if path.endswith('executeAnAccessOfAUserInABus')]
+            assert len(passenger_events) == 800
+            assert {p['user_id'] for p in passenger_events} == {10}
+            assert len({(p['device_id'], p['accessDate']) for p in passenger_events}) == 800
+            print(f'PASS: {service} with 8 devices × 100 repetitions and one shared passenger')
+        fixture.write_text(original_fixture)
+        env.update(VUS='2', JOURNEYS='2')
         records.clear()
         env.update(SERVICE='beginRouteAccess', JOURNEYS='3')
         result = subprocess.run([str(Path(__file__).with_name('run.sh').resolve()),str(fixture)],env=env,text=True,capture_output=True,timeout=90)
-        assert result.returncode != 0 and not records, 'Exhausted passenger pools must fail before begin route'
-        assert 'unused passengers' in result.stdout + result.stderr
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert len(records) == 12
+        assert len({p['trace_id'] for _, p in records}) == 6
         env['JOURNEYS'] = '2'
-        print('PASS: exhausted passenger pools rejected before any writes')
+        print('PASS: passenger pools cycle for repeated events without exhaustion')
         mode = 'merged-partial'
         records.clear()
         env.update(SERVICE='beginAMergeRoute', VUS='1', JOURNEYS='1')

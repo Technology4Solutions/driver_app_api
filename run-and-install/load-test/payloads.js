@@ -65,23 +65,13 @@ export function databaseSaved(envelope, expectedRoutes) {
   return expectedRoutes > 0 && Array.isArray(routes) && routes.length === expectedRoutes && routes.every(r => r.response?.code === 0 || r.response?.object?.database_saved === true);
 }
 
-// Allocate before any request so exhausted pools cannot leave a partially started run.
+// Validate pools before requests, then cycle passengers for independent events.
 export function allocatePassengers(devices, steps, iterations, startDate) {
   if (!steps.includes('executeAnAccessOfAUserInABus')) return devices.map(() => []);
-  const used = new Set();
   return devices.map(d => {
     if (d.passenger_date && d.passenger_date !== startDate.slice(0, 10)) throw new Error(`Device ${d.device_id}: re-export passengers for the simulated start date`);
     const pool = d.passengers || [{passenger_id: d.passenger_id, access_type: d.access_type}];
-    const assigned = [];
-    for (const passenger of pool) {
-      if (!positive(passenger.passenger_id) || !positive(passenger.access_type)) throw new Error(`Device ${d.device_id}: invalid passenger pool`);
-      const id = Number(passenger.passenger_id);
-      if (used.has(id)) continue;
-      used.add(id);
-      assigned.push(passenger);
-      if (assigned.length === iterations) break;
-    }
-    if (assigned.length !== iterations) throw new Error(`Device ${d.device_id}: needs ${iterations} distinct unused passengers; found ${assigned.length}. Re-export test data or reduce repetitions/devices.`);
-    return assigned;
+    if (!pool.length || pool.some(p => !positive(p.passenger_id) || !positive(p.access_type))) throw new Error(`Device ${d.device_id}: requires valid route passengers with access methods`);
+    return Array.from({length: iterations}, (_, index) => pool[index % pool.length]);
   });
 }

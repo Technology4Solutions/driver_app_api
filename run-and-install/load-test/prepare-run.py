@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Prepare a private, validated dataset for one run; database queries are SELECT-only."""
 import argparse
-import itertools
 import json
 import math
 import os
@@ -41,32 +40,17 @@ def validate(device, steps):
 
 
 def allocate(rows, count):
-    # Match passenger IDs to slots, allowing reassignment when route pools overlap.
-    owners, assignments = {}, {}
-    pools = []
+    # Repetitions are separate events, not a demand for new passenger identities.
+    result = []
     for d in rows:
         pool = d.get('passengers', [{'passenger_id': d.get('passenger_id'), 'access_type': d.get('access_type')}])
-        pools.append({int(p['passenger_id']): p for p in pool if positive(p.get('passenger_id')) and positive(p.get('access_type'))})
-
-    def match(slot, seen):
-        for user_id in pools[slot[0]]:
-            if user_id in seen:
-                continue
-            seen.add(user_id)
-            previous = owners.get(user_id)
-            if previous is None or match(previous, seen):
-                owners[user_id] = slot
-                assignments[slot] = user_id
-                return True
-        return False
-
-    for index in sorted(range(len(rows)), key=lambda i: len(pools[i])):
-        if len(pools[index]) < count:
+        valid = {int(p['passenger_id']): p for p in pool
+                 if positive(p.get('passenger_id')) and positive(p.get('access_type'))}
+        if not valid:
             return None
-        for iteration in range(count):
-            if not match((index, iteration), set()):
-                return None
-    return [[pools[i][assignments[(i, j)]] for j in range(count)] for i in range(len(rows))]
+        pool = list(valid.values())
+        result.append([pool[i % len(pool)] for i in range(count)])
+    return result
 
 
 def select(rows, steps, vus, iterations, start):
@@ -81,8 +65,8 @@ def select(rows, steps, vus, iterations, start):
             if ACCESS in steps:
                 if d.get('passenger_date') and d['passenger_date'] != start[:10]:
                     raise ValueError('Passenger date does not match simulated date')
-                if allocate([d], iterations) is None:
-                    raise ValueError('Needs %d unused passengers; has %d' % (iterations, len(d.get('passengers', []))))
+                if allocate([d], 1) is None:
+                    raise ValueError('Needs at least one valid route passenger with an access method')
             candidates.append(d)
         except (ValueError, TypeError, OverflowError) as error:
             rejected.append('Device %s: %s' % (d.get('device_id', '?'), error))
@@ -90,18 +74,8 @@ def select(rows, steps, vus, iterations, start):
         raise ValueError('Data preparation failed: need %d eligible devices, found %d. %s' % (vus, len(candidates), '; '.join(rejected)))
     if ACCESS not in steps:
         return candidates[:vus]
-    # Prefer generous pools, but try other device combinations if shared passengers conflict.
-    candidates.sort(key=lambda d: -len(d.get('passengers', [])))
-    for attempt, subset in enumerate(itertools.combinations(candidates, vus)):
-        if attempt >= 10000:
-            break
-        allocations = allocate(subset, iterations)
-        if allocations is not None:
-            result = []
-            for d, passengers in zip(subset, allocations):
-                result.append(dict(d, passengers=passengers, **passengers[0]))
-            return result
-    raise ValueError('Data preparation failed: not enough distinct unused passengers across %d devices for %d repetitions. Reduce devices/repetitions or add valid test relationships.' % (vus, iterations))
+    # Keep the actual passenger pools compact; k6 cycles them for each repetition.
+    return [dict(d, **allocate([d], 1)[0][0]) for d in candidates[:vus]]
 
 
 def validate_dates(steps, iterations, start):
@@ -112,8 +86,8 @@ def validate_dates(steps, iterations, start):
     zone = ZoneInfo('America/New_York')
     for iteration in range(iterations):
         event = stamp + timedelta(milliseconds=iteration * max(120000, len(steps) * 60000) + steps.index(ACCESS) * 60000)
-        if event.year < 2007 or event.date() != stamp.date():
-            raise ValueError('Passenger run must stay within the prepared date and use year 2007 or later')
+        if event.year < 2007:
+            raise ValueError('Passenger run must use year 2007 or later')
         if event.replace(tzinfo=zone, fold=0).utcoffset() != event.replace(tzinfo=zone, fold=1).utcoffset():
             raise ValueError('Passenger time is ambiguous or nonexistent in America/New_York')
 
@@ -160,7 +134,7 @@ def main():
     with os.fdopen(fd, 'w') as stream:
         json.dump(selected, stream)
     print('Data ready: devices %s%s. Database unchanged.' % (', '.join(str(d['device_id']) for d in selected),
-          '; %d distinct passengers' % (args.vus * args.iterations) if ACCESS in steps else ''), flush=True)
+          '; passengers reused across repetitions' if ACCESS in steps else ''), flush=True)
     print('Step 2/2: ready for k6 execution.', flush=True)
 
 

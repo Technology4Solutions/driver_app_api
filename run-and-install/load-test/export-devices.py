@@ -99,7 +99,7 @@ def main():
     parser.add_argument('--env-file', type=Path, default=ROOT / '.env')
     parser.add_argument('--config-file', type=Path, help='Private Jenkins/Vault JSON; replaces .env settings')
     parser.add_argument('--passenger-date', type=date.fromisoformat, default=datetime.now(ZoneInfo('Africa/Casablanca')).date(),
-                        help='Simulated test date; exclude passengers already recorded on this date')
+                        help='Simulated start date recorded in the exported passenger snapshot')
     parser.add_argument('--limit', type=int, default=1000)
     parser.add_argument('--output', type=Path, default=ROOT / 'run-and-install/devices.local.json')
     args = parser.parse_args()

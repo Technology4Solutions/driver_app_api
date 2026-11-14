@@ -419,17 +419,12 @@ Omit the date to use today in Africa/Casablanca. The script works from any worki
 directory and forwards exporter options such as `--env-file`, `--output`, and `--limit`.
 
 The SELECT-only export selects active `users.user_type_id = 2` passengers assigned
-through `route_users`, with a matching `user_access_data` method. It excludes users
-with any `traffic` record on the selected date. Devices with eligible passengers
-are placed first. Each device includes a `passengers` pool and `passenger_date`.
-One different passenger is allocated per device and repetition, without reuse
-across the run. Insufficient pools or a mismatched simulated date fail before any
-HTTP requests. Reduce devices/repetitions if the available pool is too small.
-
-When bypassing the launchers and invoking k6 directly, re-export after every run:
-the saved source dataset is a snapshot and does not consume passengers between runs. A new run ID alone does not make a passenger
-new to the dashboard's unique-passenger counter. Passengers can already be counted
-in a browser session; use matching dashboard date filters and refresh its counters.
+through `route_users`, with a matching `user_access_data` method. Existing traffic
+records do not exclude passengers. Each repetition cycles through the route's
+passenger pool, creating a new event with its own trace and simulated timestamp.
+At least one valid passenger per device is required for passenger scenarios.
+Repeated events do not increase a dashboard's distinct-passenger count; compare
+request and traffic-event counts when assessing load-test volume.
 
 ### Automatic preparation before every test
 
@@ -439,16 +434,14 @@ results and the selected device IDs. Preparation refreshes valid device relation
 from the configured database and selects from the freshly exported devices. Old
 device IDs in the source snapshot do not restrict online selection. It selects
 devices that meet the chosen service's requirements, including
-merged routes, status fields, and distinct unused passengers for every repetition.
-Passenger allocations also account for overlapping route memberships.
+merged routes, status fields, and valid passengers with matching access methods.
 
-For example, 2 devices × 3 passenger repetitions requires 6 distinct passengers;
-devices with smaller pools are skipped. If no valid selection exists, preparation
-fails before any API request. It never inserts users or relationships. Each run
+For example, 8 devices × 100 repetitions runs 800 passenger events even if each
+route has only one passenger. Shared route passengers can be used by multiple
+devices. Preparation never creates users or deletes existing traffic. Each run
 uses a private temporary snapshot and leaves the source dataset unchanged.
-Passenger simulations must stay within the selected date, avoiding ambiguous DST
-hours. Database availability is checked again for every run; the same users are
-excluded once their events have been saved on that date.
+Simulated events may cross midnight; ambiguous or nonexistent New York DST times
+are still rejected before execution.
 
 CLI preparation reads the project `.env` by default; set `LOAD_TEST_ENV_FILE` to
 use another configuration file. The local web runner uses its `--env-file` setting.

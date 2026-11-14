@@ -65,17 +65,27 @@ class PreparationTests(unittest.TestCase):
     def test_selects_devices_with_enough_passengers(self):
         rows = [device(1, [10, 11]), device(2, [20, 21, 22]), device(3, [30, 31, 32])]
         result = prepare.select(rows, [prepare.ACCESS], 2, 3, '2026-11-14')
-        self.assertEqual({d['device_id'] for d in result}, {2, 3})
-        self.assertEqual(len({p['passenger_id'] for d in result for p in d['passengers']}), 6)
+        self.assertEqual({d['device_id'] for d in result}, {1, 2})
+        self.assertEqual(len(result), 2)
 
     def test_shared_passengers_are_reassigned(self):
         rows = [device(1, [10, 11]), device(2, [10])]
         result = prepare.select(rows, [prepare.ACCESS], 2, 1, '2026-11-14')
-        self.assertEqual(len({d['passenger_id'] for d in result}), 2)
+        self.assertEqual(len(result), 2)
 
-    def test_insufficient_unique_passengers_are_rejected(self):
-        with self.assertRaisesRegex(ValueError, 'distinct unused passengers'):
-            prepare.select([device(1, [10]), device(2, [10])], [prepare.ACCESS], 2, 1, '2026-11-14')
+    def test_eight_devices_can_repeat_one_passenger_100_times_for_every_service(self):
+        rows = [device(i, [10]) for i in range(1, 9)]
+        catalog = json.loads((Path(__file__).parent / 'services.json').read_text())
+        for name, descriptor in catalog.items():
+            steps = descriptor.get('steps', [name])
+            result = prepare.select(rows, steps, 8, 100, '2026-11-14')
+            self.assertEqual(len(result), 8)
+            prepare.validate_dates(steps, 100, '2026-11-14T08:00:00Z')
+        assigned = prepare.allocate(rows, 100)
+        self.assertTrue(all(len(pool) == 100 for pool in assigned))
+        self.assertEqual({p['passenger_id'] for pool in assigned for p in pool}, {10})
+        with self.assertRaisesRegex(ValueError, 'at least one valid'):
+            prepare.select([device(1, [])], [prepare.ACCESS], 1, 100, '2026-11-14')
 
     def test_other_services_do_not_require_passengers(self):
         self.assertEqual(len(prepare.select([device(1, [])], ['beginARoute'], 1, 100, '2026-11-14')), 1)
@@ -99,7 +109,7 @@ class PreparationTests(unittest.TestCase):
 
     def test_date_validation(self):
         prepare.validate_dates(['beginARoute', prepare.ACCESS], 3, '2026-11-14T08:00:00Z')
-        for stamp in ('2026-03-08T02:00:00Z', '2026-11-01T01:00:00Z', '2026-11-14T23:59:00Z'):
+        for stamp in ('2026-03-08T02:00:00Z', '2026-11-01T01:00:00Z'):
             with self.assertRaises(ValueError):
                 prepare.validate_dates(['beginARoute', prepare.ACCESS], 2, stamp)
 

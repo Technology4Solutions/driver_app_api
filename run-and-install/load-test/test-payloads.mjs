@@ -62,9 +62,10 @@ const pools = [
   {...fixture, passengers: [{passenger_id: 10, access_type: 3}, {passenger_id: 11, access_type: 4}]},
   {...fixture, device_id: 2, passengers: [{passenger_id: 10, access_type: 3}, {passenger_id: 12, access_type: 3}, {passenger_id: 13, access_type: 4}]},
 ];
-assert.deepEqual(allocatePassengers(pools, accessSteps, 2, '2026-11-14'), [pools[0].passengers, pools[1].passengers.slice(1)]);
-assert.throws(() => allocatePassengers(pools, accessSteps, 3, '2026-11-14'), /distinct unused passengers/);
+assert.deepEqual(allocatePassengers(pools, accessSteps, 2, '2026-11-14'), [pools[0].passengers, pools[1].passengers.slice(0, 2)]);
+assert.equal(allocatePassengers(pools, accessSteps, 100, '2026-11-14')[0].length, 100);
 assert.throws(() => allocatePassengers([{...pools[0], passenger_date: '2026-11-13'}], accessSteps, 1, '2026-11-14'), /simulated start date/);
-assert.throws(() => allocatePassengers([fixture, {...fixture, device_id: 2}], accessSteps, 1, '2026-11-14'), /distinct unused passengers/);
+assert.equal(allocatePassengers([fixture, {...fixture, device_id: 2}], accessSteps, 100, '2026-11-14')[1][99].passenger_id, fixture.passenger_id);
+assert.throws(() => allocatePassengers([{...fixture, passengers: []}], accessSteps, 1, '2026-11-14'), /valid route passengers/);
 assert.deepEqual(allocatePassengers([fixture], ['beginARoute'], 100, '2026-11-14'), [[]]);
-console.log('PASS: unique passenger allocation across devices/repetitions, exhaustion, and date checks');
+console.log('PASS: passenger pool cycling across devices/repetitions, missing pools, and date checks');
