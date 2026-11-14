@@ -150,8 +150,9 @@ def main():
             if args.config_file:
                 command.extend(['--config-file', str(args.config_file)])
             subprocess.run(command, check=True, timeout=180)
-            allowed = {int(d['device_id']) for d in source}
-            rows = [d for d in json.loads(exported.read_text()) if int(d['device_id']) in allowed]
+            # Online runs use current database relationships. The saved source
+            # is a snapshot, so its old IDs must not exclude newly eligible devices.
+            rows = json.loads(exported.read_text())
     selected = select(rows, steps, args.vus, args.iterations, args.start)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(str(args.output), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)

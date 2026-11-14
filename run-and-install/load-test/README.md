@@ -436,8 +436,9 @@ in a browser session; use matching dashboard date filters and refresh its counte
 The web page and `run.sh` now prepare data automatically before launching k6.
 The page shows **preparing**, then **running**. Live output retains preparation
 results and the selected device IDs. Preparation refreshes valid device relationships
-from the configured database, using the source dataset's device IDs as the allowed
-scope. It selects devices that meet the chosen service's requirements, including
+from the configured database and selects from the freshly exported devices. Old
+device IDs in the source snapshot do not restrict online selection. It selects
+devices that meet the chosen service's requirements, including
 merged routes, status fields, and distinct unused passengers for every repetition.
 Passenger allocations also account for overlapping route memberships.
 

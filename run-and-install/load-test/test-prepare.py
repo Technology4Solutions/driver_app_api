@@ -21,6 +21,29 @@ def device(id, passengers):
 
 
 class PreparationTests(unittest.TestCase):
+    def test_online_run_uses_all_eight_fresh_devices_despite_stale_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, output = root / 'source.json', root / 'prepared.json'
+            old_ids = [699, 890, 931, 939, 940, 943, 950, 186]
+            fresh_ids = [699, 757, 880, 890, 899, 939, 943, 961]
+            source.write_text(json.dumps([device(id, [id]) for id in old_ids]))
+            original_source = source.read_bytes()
+            fresh_rows = [device(id, [id + 10000]) for id in fresh_ids]
+
+            def export(command, **kwargs):
+                Path(command[command.index('--output') + 1]).write_text(json.dumps(fresh_rows))
+
+            args = ['prepare-run.py', '--source', str(source), '--output', str(output),
+                    '--service', 'beginRouteAccess', '--vus', '8', '--iterations', '1',
+                    '--start', '2026-11-14T08:00:00Z']
+            with patch.object(sys, 'argv', args), patch.object(prepare.subprocess, 'run', side_effect=export):
+                prepare.main()
+            selected = json.loads(output.read_text())
+            self.assertEqual({row['device_id'] for row in selected}, set(fresh_ids))
+            self.assertEqual(len({row['passenger_id'] for row in selected}), 8)
+            self.assertEqual(source.read_bytes(), original_source)
+
     def test_cli_forwards_vault_file_to_exporter(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
