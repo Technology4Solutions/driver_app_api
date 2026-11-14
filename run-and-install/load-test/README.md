@@ -7,6 +7,11 @@ python3 run-and-install/load-test/export-devices.py --limit 1000
 ```
 
 The exporter reads connection settings from `.env`; override with `--env-file PATH`.
+Embedded `#` characters in passwords are preserved; an unquoted comment begins
+after whitespace. Single quotes preserve literal `$` characters. Existing `DB_*`
+environment variables take precedence over file values, as in the API.
+After updating the exporter, deploy the updated source to the dev runner's project
+directory; preparation reads this source through its bind mount.
 It writes `run-and-install/devices.local.json` with mode 600. That dataset is
 currently tracked in this repository and included in deployment archives, but
 excluded from Docker builds. It selects one combination per active device using active bus-device

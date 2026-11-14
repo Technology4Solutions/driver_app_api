@@ -6,23 +6,78 @@ from zoneinfo import ZoneInfo
 import json
 import os
 from pathlib import Path
-import shlex
+import re
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def env_value(raw, values):
+    """Parse dotenv values, preserving embedded # characters in credentials."""
+    raw = raw.strip()
+    if not raw or raw.startswith('#'):
+        return ''
+    output, quote, index = [], None, 0
+    while index < len(raw):
+        char = raw[index]
+        if quote == "'":
+            if char == "'":
+                quote = None
+            else:
+                output.append(char)
+        elif char == '\\':
+            index += 1
+            if index >= len(raw):
+                raise ValueError('Incomplete escape')
+            escaped = raw[index]
+            if escaped not in "\\'\"$ n":
+                raise ValueError('Invalid escape')
+            output.append('\n' if escaped == 'n' else escaped)
+        elif char == '$':
+            # dotenvy expands variables outside single quotes; never run shell code.
+            match = re.match(r'\$\{([^}]+)\}|\$([a-zA-Z0-9]+)', raw[index:])
+            if match:
+                name = match.group(1) or match.group(2)
+                output.append(os.environ.get(name, values.get(name, '')))
+                index += len(match.group()) - 1
+            elif raw[index:].startswith('${'):
+                raise ValueError('Incomplete variable reference')
+        elif char == quote:
+            quote = None
+        elif quote == '"':
+            output.append(char)
+        elif char in "'\"":
+            quote = char
+        elif char in ' \t':
+            tail = raw[index:].lstrip()
+            if tail and not tail.startswith('#'):
+                raise ValueError('Unquoted whitespace')
+            break
+        else:
+            output.append(char)
+        index += 1
+    if quote:
+        raise ValueError('Unclosed quote')
+    return ''.join(output)
+
+
 def read_env(path):
     values = {}
-    for line in path.read_text().splitlines():
+    for number, line in enumerate(path.read_text().splitlines(), 1):
         if not line.strip() or line.lstrip().startswith('#'):
             continue
         key, sep, value = line.partition('=')
-        if not sep or not key.strip().removeprefix('export ').startswith('DB_'):
+        key = key.strip().removeprefix('export ').strip()
+        if not sep:
             continue
-        parts = shlex.split(value, comments=True)
-        values[key.strip().removeprefix('export ')] = ' '.join(parts)
-    return values
+        try:
+            parsed = env_value(value, values)
+        except ValueError:
+            # Never include the source line: it may contain a password.
+            raise ValueError('Invalid .env value for %s at line %d' % (key, number)) from None
+        values.setdefault(key, parsed)
+    values.update({key: value for key, value in os.environ.items() if key.startswith('DB_')})
+    return {key: value for key, value in values.items() if key.startswith('DB_')}
 
 
 def query(config, sql):
