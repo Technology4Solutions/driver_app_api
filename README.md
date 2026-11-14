@@ -797,3 +797,35 @@ The CLI and DEV web runner cover all 13 business services individually, plus
 route journeys and an all-services scenario. See
 [load-test instructions](run-and-install/load-test/README.md#coverage-for-every-business-service)
 for dataset requirements, commands, and verification.
+
+
+### API error logs and Slack alerts
+
+The monitoring deployment includes Loki (seven-day filesystem retention) and
+Grafana Alloy. Alloy runs on every Swarm node and collects only containers whose
+`com.docker.swarm.service.name` matches this deployment's API service. Loki and
+Alloy are private to the monitoring network; no additional public ports are opened.
+Alloy needs access to each node's Docker socket. Its read offsets persist in a
+node-local volume, and its configuration is distributed through Swarm configs.
+
+After pushing these changes, rerun Jenkins deployment with the existing API image
+version. No API image rebuild is required. In Grafana, **Explore → Loki** should
+show logs for `{service_name="driver-app-api"}`.
+
+The provisioned alert **Device API recorded an ERROR log**, in the **Device API**
+folder, checks every 30 seconds for JSON `level="ERROR"` events over the last two
+minutes. It routes directly to the existing contact point **Slack alerts** in
+Grafana organization 1; create/test that contact point before deployment. No Slack
+webhook is stored in Git. Existing notification policies are preserved. File-
+provisioned rules must be edited in the provisioning file, then redeployed.
+
+Notifications group matching errors while the alert is firing. This is not one
+Slack message per individual log line. Use Explore for the full log details.
+Only JSON API ERROR events are matched; other stacks, warnings, plain-text
+startup failures, and errors before collection begins are outside this rule.
+Loki downtime produces an alert evaluation error rather than a normal result.
+
+The new Loki and Alloy data volumes survive monitoring restarts/removal. Back up
+Loki's volume if historical logs must survive losing the monitoring node. This
+single-instance Loki setup follows the existing single-node monitoring storage
+model; it is not a highly available logging cluster.

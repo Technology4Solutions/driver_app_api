@@ -1,0 +1,35 @@
+// Each Swarm node collects its local API containers, scoped to this stack.
+discovery.docker "api" {
+  host = "unix:///var/run/docker.sock"
+  refresh_interval = "10s"
+  filter {
+    name = "label"
+    values = ["com.docker.swarm.service.name=" + sys.env("API_LOG_SERVICE")]
+  }
+}
+discovery.relabel "api" {
+  targets = discovery.docker.api.targets
+  rule {
+    target_label = "service_name"
+    replacement = "driver-app-api"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_swarm_service_name"]
+    target_label = "swarm_service"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex = "/(.*)"
+    target_label = "container"
+  }
+}
+loki.source.docker "api" {
+  host = "unix:///var/run/docker.sock"
+  targets = discovery.relabel.api.output
+  forward_to = [loki.write.local.receiver]
+}
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

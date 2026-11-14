@@ -1,5 +1,48 @@
 version: '3.8'
 services:
+  loki:
+    image: grafana/loki:3.5.7
+    command: ["-config.file=/etc/loki/config.yml"]
+    volumes:
+      - ${MONITORING_DIR}/loki.yml:/etc/loki/config.yml:ro
+      - loki-data:/loki
+    networks: [monitoring]
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "/busybox/wget", "-q", "--spider", "http://127.0.0.1:3100/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    deploy:
+      replicas: 1
+      update_config: {parallelism: 1, order: stop-first, failure_action: pause}
+      rollback_config: {parallelism: 1, order: stop-first}
+      placement:
+        constraints: ["node.id == ${MONITORING_NODE_ID}"]
+      restart_policy: {condition: on-failure}
+  alloy:
+    image: grafana/alloy:v1.11.3
+    command: ["run", "--server.http.listen-addr=0.0.0.0:12345", "--storage.path=/var/lib/alloy", "/etc/alloy/config.alloy"]
+    user: '0:0'
+    environment:
+      API_LOG_SERVICE: ${API_LOG_SERVICE}
+    configs:
+      - source: alloy-config
+        target: /etc/alloy/config.alloy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - alloy-data:/var/lib/alloy
+    networks: [monitoring]
+    healthcheck:
+      test: ["CMD", "/bin/bash", "-ec", "exec 3<>/dev/tcp/127.0.0.1/12345; printf 'GET /-/ready HTTP/1.0\r\nHost: localhost\r\n\r\n' >&3; read -r response <&3; [[ \"$$response\" == *' 200 '* ]]"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    deploy:
+      mode: global
+      update_config: {parallelism: 1, order: stop-first, failure_action: pause}
+      rollback_config: {parallelism: 1, order: stop-first}
+      restart_policy: {condition: on-failure}
   prometheus:
     image: prom/prometheus:v3.5.0
     command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus", "--storage.tsdb.retention.time=15d"]
@@ -54,7 +97,13 @@ networks:
     external: true
     name: my_reaxium_api_network
 volumes:
+  loki-data:
+  alloy-data:
   prometheus-data:
     name: driver-api-monitoring_prometheus-data
   grafana-data:
     name: driver-api-monitoring_grafana-data
+configs:
+  alloy-config:
+    file: ${MONITORING_DIR}/alloy.alloy
+    name: ${API_LOG_SERVICE}_alloy_${ALLOY_CONFIG_HASH}

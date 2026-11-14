@@ -166,6 +166,7 @@ if a[:2]==['stack','services']:
  for name in ['driver-app-api','driver-app-rabbitmq','driver-app-redis']:print('driver_app_api_stack_'+name+' 1/1')
 if a[:2]==['service','inspect'] and '--format' in a:
  fmt=a[a.index('--format')+1]
+ if 'ServiceStatus.RunningTasks' in fmt:print('1/1');sys.exit(0)
  if os.getenv('MOCK_MONITORING_PAUSED') and '_monitoring_' in a[-1]:print('paused');sys.exit(0)
  print('reaxiumapps/driver_app_api:1.2.3@sha256:mock' if 'ContainerSpec.Image' in fmt else os.getenv('MOCK_STATE','completed'))
 ''')
@@ -258,6 +259,21 @@ if a[:2]==['service','inspect'] and '--format' in a:
         calls = self.log.read_text()
         self.assertIn('stack rm driver_app_api_stack_monitoring', calls)
         self.assertNotIn('--volumes', calls)
+
+    def test_log_collection_is_restarted_and_global_collector_is_checked(self):
+        result = self.run_script('monitoring.sh', 'start', 'custom_stack')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.log.read_text()
+        for component in ('loki', 'alloy'):
+            self.assertIn('--force custom_stack_monitoring_' + component, calls)
+        self.assertIn('{{.ServiceStatus.RunningTasks}}/{{.ServiceStatus.DesiredTasks}} --status custom_stack_monitoring_alloy', calls)
+
+    def test_missing_log_configuration_fails_preflight(self):
+        (self.path / 'monitoring/alloy.alloy').unlink()
+        result = self.run_script('deploy.sh', '--client', 'TEST', '--env', 'DEV')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Missing monitoring file: monitoring/alloy.alloy', result.stderr)
+        self.assertNotIn('stack deploy --with-registry-auth', self.log.read_text())
 
     def test_monitoring_drains_prometheus_before_replacement(self):
         result = self.run_script('monitoring.sh', 'start')

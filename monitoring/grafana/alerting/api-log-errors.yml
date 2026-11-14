@@ -1,0 +1,46 @@
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: API log errors
+    folder: Device API
+    interval: 30s
+    rules:
+      - uid: device-api-error-logs
+        title: Device API recorded an ERROR log
+        condition: B
+        for: 0s
+        noDataState: NoData
+        execErrState: Error
+        isPaused: false
+        notification_settings:
+          receiver: Slack alerts
+        labels:
+          severity: critical
+          application: device-api
+          source: error-logs
+        annotations:
+          summary: Device API recorded an ERROR log in the last two minutes
+          description: 'Inspect Explore > Loki with {service_name="driver-app-api"} | json | level="ERROR" for the matching error entries. This alert covers API containers in this stack.'
+        data:
+          - refId: A
+            datasourceUid: loki
+            relativeTimeRange: {from: 120, to: 0}
+            model:
+              datasource: {type: loki, uid: loki}
+              expr: 'sum(count_over_time({service_name="driver-app-api"} | json | level="ERROR" | __error__="" [2m])) or vector(0)'
+              queryType: instant
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange: {from: 0, to: 0}
+            model:
+              datasource: {type: __expr__, uid: __expr__}
+              type: threshold
+              expression: A
+              refId: B
+              conditions:
+                - type: query
+                  query: {params: [B]}
+                  reducer: {type: last, params: []}
+                  evaluator: {type: gt, params: [0]}
+                  operator: {type: and}
