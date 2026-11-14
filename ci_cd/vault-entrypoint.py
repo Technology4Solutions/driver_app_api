@@ -36,7 +36,7 @@ def configuration(environ, bundle, mode):
     # Export only application configuration, never arbitrary executable/shell settings.
     allowed = ('DB_', 'REAXIUM_API_', 'DEVICE_STATUS_', 'VISION_')
     exact = {'BROADCAST_ENABLED', 'DASHBOARD_BROADCAST_ENABLED', 'DEVICES_API_EXPORT_DEVICE_STATUS_URL',
-             'RABBITMQ_URL', 'REDIS_URL', 'RUST_LOG'}
+             'RABBITMQ_URL', 'REDIS_URL', 'LOG_LEVEL'}
     for key, value in bundle.items():
         if value is not None and (key.startswith(allowed) or key in exact):
             result[key] = str(value).lower() if isinstance(value, bool) else str(value)

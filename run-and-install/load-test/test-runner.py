@@ -40,8 +40,8 @@ threading.Thread(target=server.serve_forever, daemon=True).start()
 try:
     with tempfile.TemporaryDirectory() as folder:
         fixture = Path(folder) / 'devices.json'
-        fixture.write_text(json.dumps([dict(device_id=i,device_imei=f'mock-imei-{i}',business_id=1,route_id=1,route_ids='1,2',passenger_id=3,access_type=3,driver_id=1,bus_info='1',start_stop_id=1,end_stop_id=2,start_latitude=27,start_longitude=-80,end_latitude=27,end_longitude=-80) for i in [1,2]]))
-        env = dict(os.environ, API_BASE_URL=f'http://127.0.0.1:{server.server_port}',REAXIUM_API_USER='mock-user',REAXIUM_API_PASSWORD='mock-password',START_DATE='2026-10-22T08:00:00Z',VUS='2',JOURNEYS='2',MAX_DURATION='30s', SERVICE='journey')
+        fixture.write_text(json.dumps([dict(device_id=i,device_imei=f'mock-imei-{i}',business_id=1,route_id=1,route_ids='1,2',passenger_id=i*10,access_type=3,passengers=[dict(passenger_id=i*10+j,access_type=3) for j in range(2)],driver_id=1,bus_info='1',start_stop_id=1,end_stop_id=2,start_latitude=27,start_longitude=-80,end_latitude=27,end_longitude=-80) for i in [1,2]]))
+        env = dict(os.environ, LOAD_TEST_OFFLINE='1', API_BASE_URL=f'http://127.0.0.1:{server.server_port}',REAXIUM_API_USER='mock-user',REAXIUM_API_PASSWORD='mock-password',START_DATE='2026-10-22T08:00:00Z',VUS='2',JOURNEYS='2',MAX_DURATION='30s', SERVICE='journey')
         for test_mode in ['success', 'partial', 'failure']:
             mode = test_mode
             records.clear()
@@ -65,7 +65,7 @@ try:
             print(f'PASS: {mode}')
         mode = 'success'
         catalog = json.loads(Path(__file__).with_name('services.json').read_text())
-        for service in [name for name, entry in catalog.items() if 'path' in entry] + ['startARoute', 'allServices']:
+        for service in [name for name, entry in catalog.items() if 'path' in entry] + ['startARoute', 'beginRouteAccess', 'allServices']:
             records.clear()
             env['SERVICE'] = service
             result = subprocess.run([str(Path(__file__).with_name('run.sh').resolve()),str(fixture)],env=env,text=True,capture_output=True,timeout=90)
@@ -77,22 +77,34 @@ try:
             assert set(path for path, _ in records) == set(expected_paths)
             for trace in {p['trace_id'] for _, p in records}:
                 assert [path for path, p in records if p['trace_id'] == trace] == expected_paths
-            if service == 'executeAnAccessOfAUserInABus':
+            if 'executeAnAccessOfAUserInABus' in expected_steps:
+                passenger_ids = [p['user_id'] for path, p in records if path.endswith('executeAnAccessOfAUserInABus')]
+                assert len(passenger_ids) == len(set(passenger_ids)) == 4
+            if service in ('executeAnAccessOfAUserInABus', 'beginRouteAccess'):
                 from datetime import datetime
                 from zoneinfo import ZoneInfo
                 for trace in {p['trace_id'] for _, p in records}:
                     events = [p for _, p in records if p['trace_id'] == trace]
-                    begin, access, end = events
+                    begin, access = events[:2]
                     assert len({p['device_id'] for p in events}) == 1
                     assert len({p['route_id'] for p in events}) == 1
                     local_access = datetime.fromtimestamp(access['accessDate'] / 1000, ZoneInfo('America/New_York')).strftime('%Y-%m-%d %H:%M:%S')
-                    assert begin['traffic_date'] < local_access < end['traffic_date']
+                    assert begin['traffic_date'] < local_access
+                    if len(events) == 3:
+                        assert local_access < events[2]['traffic_date']
             if service == 'deviceStatus':
                 assert all('device_imei' in payload and 'device_location' in payload and 'device_status' in payload for _,payload in records)
             assert len({payload['trace_id'] for _,payload in records}) == 4
             assert 'service_iterations_completed' in result.stdout
             assert 'journeys_completed' not in result.stdout
             print(f'PASS: {service}')
+        records.clear()
+        env.update(SERVICE='beginRouteAccess', JOURNEYS='3')
+        result = subprocess.run([str(Path(__file__).with_name('run.sh').resolve()),str(fixture)],env=env,text=True,capture_output=True,timeout=90)
+        assert result.returncode != 0 and not records, 'Exhausted passenger pools must fail before begin route'
+        assert 'unused passengers' in result.stdout + result.stderr
+        env['JOURNEYS'] = '2'
+        print('PASS: exhausted passenger pools rejected before any writes')
         mode = 'merged-partial'
         records.clear()
         env.update(SERVICE='beginAMergeRoute', VUS='1', JOURNEYS='1')

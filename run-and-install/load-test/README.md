@@ -118,6 +118,16 @@ SERVICE=beginARoute VUS=1 JOURNEYS=1 ./load-test/start.sh
 SERVICE=endARoute VUS=1 JOURNEYS=1 ./load-test/start.sh
 ```
 
+Use `SERVICE=beginRouteAccess` for **Begin route + Access** in the CLI or web
+selector. Each iteration sends `beginARoute`, then passenger access one simulated
+minute later, sharing the device, route, and trace ID. This scenario requires
+`passenger_id` and `access_type` in the dataset and leaves the route open. Reset
+the isolated database between runs as needed.
+
+```bash
+SERVICE=beginRouteAccess VUS=1 JOURNEYS=1 ./load-test/start.sh
+```
+
 `SERVICE=startARoute` is also accepted as an alias for `beginARoute`.
 `SERVICE=journey` (the default) calls both endpoints. For single-endpoint services,
 JOURNEYS means repetitions per device: VUS=8 JOURNEYS=10 sends 80 requests to only
@@ -377,3 +387,58 @@ also compare the service catalog with the registered Rust business routes.
 
 Commit and deploy the runner files to update the DEV web page; the API binary
 has not changed and does not need rebuilding for these tests.
+
+### Prepare fresh passenger test data
+
+The web page and CLI refresh data automatically. To refresh the source dataset
+manually, use the date selected in the test page:
+
+```bash
+./run-and-install/load-test/prepare-data.sh 2026-11-14
+```
+
+Omit the date to use today in Africa/Casablanca. The script works from any working
+directory and forwards exporter options such as `--env-file`, `--output`, and `--limit`.
+
+The SELECT-only export selects active `users.user_type_id = 2` passengers assigned
+through `route_users`, with a matching `user_access_data` method. It excludes users
+with any `traffic` record on the selected date. Devices with eligible passengers
+are placed first. Each device includes a `passengers` pool and `passenger_date`.
+One different passenger is allocated per device and repetition, without reuse
+across the run. Insufficient pools or a mismatched simulated date fail before any
+HTTP requests. Reduce devices/repetitions if the available pool is too small.
+
+When bypassing the launchers and invoking k6 directly, re-export after every run:
+the saved source dataset is a snapshot and does not consume passengers between runs. A new run ID alone does not make a passenger
+new to the dashboard's unique-passenger counter. Passengers can already be counted
+in a browser session; use matching dashboard date filters and refresh its counters.
+
+### Automatic preparation before every test
+
+The web page and `run.sh` now prepare data automatically before launching k6.
+The page shows **preparing**, then **running**. Live output retains preparation
+results and the selected device IDs. Preparation refreshes valid device relationships
+from the configured database, using the source dataset's device IDs as the allowed
+scope. It selects devices that meet the chosen service's requirements, including
+merged routes, status fields, and distinct unused passengers for every repetition.
+Passenger allocations also account for overlapping route memberships.
+
+For example, 2 devices × 3 passenger repetitions requires 6 distinct passengers;
+devices with smaller pools are skipped. If no valid selection exists, preparation
+fails before any API request. It never inserts users or relationships. Each run
+uses a private temporary snapshot and leaves the source dataset unchanged.
+Passenger simulations must stay within the selected date, avoiding ambiguous DST
+hours. Database availability is checked again for every run; the same users are
+excluded once their events have been saved on that date.
+
+CLI preparation reads the project `.env` by default; set `LOAD_TEST_ENV_FILE` to
+use another configuration file. The web runner uses its `--env-file` setting.
+The web image includes the MySQL client and runs preparation in a helper container
+with host networking, matching k6's access to local database tunnels. Rebuild and
+restart the web runner to apply these changes; the API image does not need rebuilding.
+`LOAD_TEST_OFFLINE=1` is reserved for the mock suite: it validates supplied fixtures
+without querying a database. Real runs always use automatic database preparation.
+
+```bash
+python3 run-and-install/load-test/test-prepare.py
+```

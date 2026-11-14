@@ -55,6 +55,7 @@ class Runner:
             raise ValueError('Dataset must be a nonempty JSON array')
         self.count = len(devices)
         self.api_url = api_url
+        self.env_file = Path(env_file) if env_file is not None else ROOT.parents[2] / '.env'
         self.credentials = load_credentials(env_file) if env_file is not None else {}
         self.lock = threading.RLock()
         self.state = {'status': 'idle', 'logs': '', 'summary': None}
@@ -99,7 +100,7 @@ class Runner:
                 raise RuntimeError('A test is already running')
             self.cancel.clear()
             run_id = binascii.hexlify(os.urandom(16)).decode('ascii')
-            self.state = {'status': 'starting', 'id': run_id, 'logs': '', 'summary': None, 'exit_code': None}
+            self.state = {'status': 'preparing', 'id': run_id, 'logs': '', 'summary': None, 'exit_code': None}
             env = dict(os.environ, API_BASE_URL=self.api_url, SERVICE=service, VUS=str(vus),
                        JOURNEYS=str(journeys), MAX_DURATION=duration, START_DATE=date, RUN_ID=run_id,
                        REAXIUM_API_USER=data['username'], REAXIUM_API_PASSWORD=data['password'])
@@ -108,6 +109,25 @@ class Runner:
 
     def stop(self):
         self.cancel.set()
+
+    def prepare(self, env, output, log):
+        # Match k6 host networking so localhost DB tunnels work from the web container.
+        command = ['docker', 'run', '--rm', '--network', 'host',
+                   '--user', '%s:%s' % (os.getuid(), os.getgid()),
+                   '--mount', 'type=bind,src=%s,dst=%s,readonly' % (ROOT.parents[2], ROOT.parents[2]),
+                   '--mount', 'type=bind,src=%s,dst=%s,readonly' % (self.dataset, self.dataset),
+                   '--mount', 'type=bind,src=%s,dst=%s,readonly' % (self.env_file, self.env_file),
+                   '--mount', 'type=bind,src=%s,dst=%s' % (output.parent, output.parent),
+                   'driver-app-k6-web:local', str(ROOT.parent / 'prepare-run.py'),
+                   '--source', str(self.dataset), '--output', str(output),
+                   '--env-file', str(self.env_file), '--service', env['SERVICE'],
+                   '--vus', env['VUS'], '--iterations', env['JOURNEYS'], '--start', env['START_DATE']]
+        result = subprocess.run(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                universal_newlines=True, timeout=240)
+        log(result.stdout + result.stderr)
+        if result.returncode:
+            raise RuntimeError('Data preparation failed. k6 was not started; no API requests sent.')
+        return output
 
     def execute(self, env):
         name = 'driver-k6-web-' + env['RUN_ID']
@@ -122,11 +142,17 @@ class Runner:
 
         try:
             with tempfile.TemporaryDirectory(prefix='driver-k6-') as output:
+                dataset = self.prepare(env, Path(output, 'devices.json'), log)
+                preparation_logs = self.snapshot()['logs']
+                if self.cancel.is_set():
+                    return
+                with self.lock:
+                    self.state['status'] = 'starting'
                 command = ['docker', 'create', '--name', name, '--network', 'host', '--user', '%s:%s' % (os.getuid(), os.getgid())]
                 for key in ('API_BASE_URL', 'SERVICE', 'VUS', 'JOURNEYS', 'MAX_DURATION', 'START_DATE', 'RUN_ID', 'REAXIUM_API_USER', 'REAXIUM_API_PASSWORD'):
                     command += ['-e', key]
                 command += ['--mount', 'type=bind,src=%s,dst=/scripts,readonly' % ROOT.parent,
-                            '--mount', 'type=bind,src=%s,dst=/data/devices.json,readonly' % self.dataset,
+                            '--mount', 'type=bind,src=%s,dst=/data/devices.json,readonly' % dataset,
                             '--mount', 'type=bind,src=%s,dst=/results' % output,
                             'grafana/k6:latest', 'run', '--summary-export=/results/summary.json', '/scripts/routes.js']
                 result = subprocess.run(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=300)
@@ -144,7 +170,7 @@ class Runner:
                         state = json.loads(result.stdout)
                         logs = subprocess.run(['docker', 'logs', '--tail', '300', name], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=15)
                         with self.lock:
-                            self.state['logs'] = ''
+                            self.state['logs'] = preparation_logs
                         log(logs.stdout + logs.stderr)
                         if not state['Running']:
                             with self.lock:

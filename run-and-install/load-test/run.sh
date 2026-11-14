@@ -17,7 +17,14 @@ if sys.argv[2] not in services:
     raise SystemExit('SERVICE must be one of: ' + ', '.join(services))
 CHECK_SERVICE
 export RUN_ID="${RUN_ID:-$(python3 -c 'import uuid; print(uuid.uuid4().hex)')}"
-dataset="$(realpath -- "$1")"
+preparation_dir="$(mktemp -d "${TMPDIR:-/tmp}/driver-k6-prepare.XXXXXX")"
+trap 'rm -rf -- "$preparation_dir"' EXIT
+preparation_options=()
+if [[ "${LOAD_TEST_OFFLINE:-0}" == 1 ]]; then preparation_options+=(--offline); fi
+python3 "$script_dir/prepare-run.py" --source "$(realpath -- "$1")" \
+  --output "$preparation_dir/devices.json" --env-file "${LOAD_TEST_ENV_FILE:-$script_dir/../../.env}" \
+  --service "$SERVICE" --vus "$VUS" --iterations "$JOURNEYS" --start "$START_DATE" "${preparation_options[@]}"
+dataset="$preparation_dir/devices.json"
 echo "Run $RUN_ID: $VUS devices, $JOURNEYS iterations each, service=$SERVICE; writes to $API_BASE_URL."
 test_exit=0
 docker run --rm --network host --user "$(id -u):$(id -g)" \
@@ -28,6 +35,7 @@ docker run --rm --network host --user "$(id -u):$(id -g)" \
   grafana/k6:latest run /scripts/routes.js || test_exit=$?
 case "$SERVICE" in
   deviceStatus) service_label='device/DeviceStatus/update' ;;
+  beginRouteAccess) service_label='beginARoute + passenger access' ;;
   journey) service_label='beginARoute + endARoute (journey)' ;;
   executeAnAccessOfAUserInABus) service_label='beginARoute + passenger access + endARoute' ;;
   *) service_label="$SERVICE" ;;

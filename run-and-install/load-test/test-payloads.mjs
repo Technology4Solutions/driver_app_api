@@ -2,7 +2,7 @@
 import {readFileSync} from 'node:fs';
 import assert from 'node:assert/strict';
 const root = new URL('./', import.meta.url);
-const {payload, validateDevice, databaseSaved, accessTimestamp} = await import('data:text/javascript;base64,' + Buffer.from(readFileSync(new URL('payloads.js', root))).toString('base64'));
+const {payload, validateDevice, databaseSaved, accessTimestamp, allocatePassengers} = await import('data:text/javascript;base64,' + Buffer.from(readFileSync(new URL('payloads.js', root))).toString('base64'));
 const catalog = JSON.parse(readFileSync(new URL('services.json', root)));
 const fixture = {device_id: 1, route_id: 2, route_ids: '2,3', driver_id: 4, passenger_id: 5, access_type: 3, bus_info: '6', device_imei: 'mock', business_id: 1,
   start_stop_id: 7, end_stop_id: 8, start_latitude: 27, start_longitude: -80, end_latitude: 28, end_longitude: -81};
@@ -50,3 +50,21 @@ assert.equal(new Date(trip[1].accessDate).toISOString(), '2026-11-12T13:01:00.00
 assert.equal(trip[0].traffic_date, '2026-11-12 08:00:00');
 assert.equal(trip[2].traffic_date, '2026-11-12 08:02:00');
 console.log('PASS: passenger trip sequence and New York timestamp consistency');
+
+assert.deepEqual(catalog.beginRouteAccess.steps, ['beginARoute', 'executeAnAccessOfAUserInABus']);
+validateDevice(fixture, catalog.beginRouteAccess.steps);
+assert.throws(() => validateDevice({...fixture, passenger_id: null}, catalog.beginRouteAccess.steps));
+assert.throws(() => validateDevice({...fixture, access_type: null}, catalog.beginRouteAccess.steps));
+console.log('PASS: begin route + access sequence and passenger fixture requirements');
+
+const accessSteps = catalog.beginRouteAccess.steps;
+const pools = [
+  {...fixture, passengers: [{passenger_id: 10, access_type: 3}, {passenger_id: 11, access_type: 4}]},
+  {...fixture, device_id: 2, passengers: [{passenger_id: 10, access_type: 3}, {passenger_id: 12, access_type: 3}, {passenger_id: 13, access_type: 4}]},
+];
+assert.deepEqual(allocatePassengers(pools, accessSteps, 2, '2026-11-14'), [pools[0].passengers, pools[1].passengers.slice(1)]);
+assert.throws(() => allocatePassengers(pools, accessSteps, 3, '2026-11-14'), /distinct unused passengers/);
+assert.throws(() => allocatePassengers([{...pools[0], passenger_date: '2026-11-13'}], accessSteps, 1, '2026-11-14'), /simulated start date/);
+assert.throws(() => allocatePassengers([fixture, {...fixture, device_id: 2}], accessSteps, 1, '2026-11-14'), /distinct unused passengers/);
+assert.deepEqual(allocatePassengers([fixture], ['beginARoute'], 100, '2026-11-14'), [[]]);
+console.log('PASS: unique passenger allocation across devices/repetitions, exhaustion, and date checks');

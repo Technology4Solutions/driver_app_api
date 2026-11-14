@@ -32,7 +32,7 @@ export function validateDevice(device, steps) {
     const ids = mergedIds(device);
     if (ids.length < 2 || !ids.every(positive) || new Set(ids).size !== ids.length) throw new Error(`Dataset device ${device.device_id} needs route_ids with at least two distinct valid routes. Re-export using export-devices.py; older datasets only contain route_id. Select devices with two related routes before running a merged test.`);
   }
-  if (steps.includes('executeAnAccessOfAUserInABus') && (!positive(device.passenger_id) || !positive(device.access_type))) throw new Error('Passenger service requires passenger_id and access_type matching user_access_data');
+  if (steps.includes('executeAnAccessOfAUserInABus') && !device.passengers?.length && (!positive(device.passenger_id) || !positive(device.access_type))) throw new Error('Passenger service requires passenger_id and access_type matching user_access_data');
 }
 export function payload(action, d, start, trace) {
   const finishing = /^(end|interrupt)/.test(action);
@@ -63,4 +63,25 @@ export function databaseSaved(envelope, expectedRoutes) {
   if (envelope?.code === 0 || envelope?.object?.database_saved === true) return true;
   const routes = envelope?.object?.routes;
   return expectedRoutes > 0 && Array.isArray(routes) && routes.length === expectedRoutes && routes.every(r => r.response?.code === 0 || r.response?.object?.database_saved === true);
+}
+
+// Allocate before any request so exhausted pools cannot leave a partially started run.
+export function allocatePassengers(devices, steps, iterations, startDate) {
+  if (!steps.includes('executeAnAccessOfAUserInABus')) return devices.map(() => []);
+  const used = new Set();
+  return devices.map(d => {
+    if (d.passenger_date && d.passenger_date !== startDate.slice(0, 10)) throw new Error(`Device ${d.device_id}: re-export passengers for the simulated start date`);
+    const pool = d.passengers || [{passenger_id: d.passenger_id, access_type: d.access_type}];
+    const assigned = [];
+    for (const passenger of pool) {
+      if (!positive(passenger.passenger_id) || !positive(passenger.access_type)) throw new Error(`Device ${d.device_id}: invalid passenger pool`);
+      const id = Number(passenger.passenger_id);
+      if (used.has(id)) continue;
+      used.add(id);
+      assigned.push(passenger);
+      if (assigned.length === iterations) break;
+    }
+    if (assigned.length !== iterations) throw new Error(`Device ${d.device_id}: needs ${iterations} distinct unused passengers; found ${assigned.length}. Re-export test data or reduce repetitions/devices.`);
+    return assigned;
+  });
 }

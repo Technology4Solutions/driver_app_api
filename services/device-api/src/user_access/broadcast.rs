@@ -17,9 +17,26 @@ pub(super) async fn dispatch(
     ));
     let channels = channels(pool, device_id).await?;
     if channels.is_empty() {
+        tracing::info!(
+            device_id,
+            traffic_id,
+            "user access broadcast skipped: no interested businesses"
+        );
         return Ok("skipped_no_businesses");
     }
     content["channels"] = json!(channels);
+    tracing::debug!(
+        device_id,
+        traffic_id,
+        payload = %json!({"ReaxiumParameters":{"WebSocketPusher":{"content":&content}}}),
+        "sending user access message to WebSocket gateway"
+    );
     send(config, &content).await?;
+    tracing::info!(
+        device_id,
+        traffic_id,
+        channel_count = channels.len(),
+        "user access message accepted by WebSocket gateway"
+    );
     Ok("sent")
 }

@@ -7,7 +7,7 @@ services:
     environment:
       API_BIND: ${API_BIND:-127.0.0.1:8080}
       ADMIN_BIND: ${ADMIN_BIND:-127.0.0.1:9090}
-      RUST_LOG: ${RUST_LOG:-info,tower_http=debug}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
       DB_HOST: ${DB_HOST:?Set DB_HOST in .env}
       DB_PORT: ${DB_PORT:-3306}
       DB_NAME: ${DB_NAME:?Set DB_NAME in .env}

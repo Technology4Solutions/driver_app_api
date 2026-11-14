@@ -53,7 +53,7 @@ scrapes for rates. Check http://localhost:9091/targets if panels are empty.
 
 Configuration is loaded automatically from `.env`; existing process environment variables take precedence. `.env` is excluded from Git and Docker build contexts. Use `.env.example` as a template.
 
-Database parameters: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_MAX_CONNECTIONS`, and `DB_CONNECT_TIMEOUT_SECONDS`. All are required for native execution. The API verifies the connection before opening HTTP listeners and closes the pool on graceful shutdown. `API_BIND`, `ADMIN_BIND`, and `RUST_LOG` configure listeners and logging.
+Database parameters: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_MAX_CONNECTIONS`, and `DB_CONNECT_TIMEOUT_SECONDS`. All are required for native execution. The API verifies the connection before opening HTTP listeners and closes the pool on graceful shutdown. `API_BIND`, `ADMIN_BIND`, and `LOG_LEVEL` configure listeners and logging. Set `LOG_LEVEL=INFO` (default) to emit INFO and ERROR logs, or `LOG_LEVEL=DEBUG` to emit INFO, DEBUG, and ERROR logs. Other values are rejected at startup. Restart the service after changing this setting.
 
 Both native execution and Docker Compose connect to the existing remote MySQL server using the settings in `.env`. No database container is created. The database and user must already exist, and the server must be reachable from the API. The current Compose API uses Linux host networking and binds its HTTP listeners to localhost by default.
 
@@ -738,7 +738,10 @@ curl -i -u "$REAXIUM_API_USER:$REAXIUM_API_PASSWORD" \
 `/school_bus_cloud/UserAccess/executeAnAccessOfAUserInABus` use Basic authentication
 and `ReaxiumParameters.UserAccess`. Legacy Volley duplicate JSON content types are
 normalized before strict JSON parsing. Logs identify request arrival, rejection reason,
-and final database/publication status without logging credentials or passenger payloads.
+and final database/publication status without logging credentials. With `LOG_LEVEL=DEBUG`,
+logs also include the outgoing WebSocket gateway JSON object (including passenger data
+and channels) before sending, and a confirmation after the gateway reports success.
+These payload and confirmation logs are omitted at `LOG_LEVEL=INFO`.
 Required fields are `user_id`, `device_id`,
 `traffic_type`, `access_type`, `traffic_info`, `trace_id`, `latitude`, `longitude`,
 `bus_info` (bus ID), `accessDate`, `stop_id`, `stop_id_by_distance`, `route_id`, and

@@ -69,6 +69,13 @@
       "endARoute"
     ]
   },
+  "beginRouteAccess": {
+    "label": "Begin route + Access",
+    "steps": [
+      "beginARoute",
+      "executeAnAccessOfAUserInABus"
+    ]
+  },
   "journey": {
     "label": "Journey \u00b7 begin + end route",
     "steps": [

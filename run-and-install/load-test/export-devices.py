@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Export one related device/bus/driver/route combination per device; SELECT only."""
 import argparse
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 import json
 import os
 from pathlib import Path
@@ -16,8 +18,8 @@ def read_env(path):
         if not line.strip() or line.lstrip().startswith('#'):
             continue
         key, sep, value = line.partition('=')
-        if not sep:
-            raise ValueError('Expected KEY=value in configuration file')
+        if not sep or not key.strip().removeprefix('export ').startswith('DB_'):
+            continue
         parts = shlex.split(value, comments=True)
         values[key.strip().removeprefix('export ')] = ' '.join(parts)
     return values
@@ -38,6 +40,8 @@ def query(config, sql):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--env-file', type=Path, default=ROOT / '.env')
+    parser.add_argument('--passenger-date', type=date.fromisoformat, default=datetime.now(ZoneInfo('Africa/Casablanca')).date(),
+                        help='Simulated test date; exclude passengers already recorded on this date')
     parser.add_argument('--limit', type=int, default=1000)
     parser.add_argument('--output', type=Path, default=ROOT / 'run-and-install/devices.local.json')
     args = parser.parse_args()
@@ -50,6 +54,18 @@ def main():
     rows = [json.loads(line) for line in query(config, sql.replace('__LIMIT__', str(args.limit))).splitlines() if line]
     if not rows:
         raise RuntimeError('No eligible combinations found; no output written. Check active device/bus/driver/route/stop relationships.')
+    routes = ','.join(str(int(row['route_id'])) for row in rows)
+    passenger_sql = Path(__file__).with_name('export-passengers.sql').read_text()
+    passenger_sql = passenger_sql.replace('__ROUTES__', routes).replace('__DATE__', args.passenger_date.isoformat())
+    passengers = [json.loads(line) for line in query(config, passenger_sql).splitlines() if line]
+    for row in rows:
+        row['passengers'] = [{k: passenger[k] for k in ('passenger_id', 'access_type')}
+                             for passenger in passengers if passenger['route_id'] == row['route_id']]
+        row['passenger_date'] = args.passenger_date.isoformat()
+        row['passenger_id'] = row['passengers'][0]['passenger_id'] if row['passengers'] else None
+        row['access_type'] = row['passengers'][0]['access_type'] if row['passengers'] else None
+    rows.sort(key=lambda row: not row['passengers'])
+    print('Eligible passenger counts per device: ' + ', '.join(str(row['device_id']) + ':' + str(len(row['passengers'])) for row in rows))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     os.fchmod(fd, 0o600)

@@ -11,7 +11,7 @@ services:
     image: reaxiumapps/driver_app_api:${API_VERSION:?Set API_VERSION}
     environment:
       <<: *vault
-      RUST_LOG: info
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     secrets: [VAULT_TOKEN]
     ports: ['8080:8080']
     networks: [my_reaxium_api_network]

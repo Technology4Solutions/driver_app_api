@@ -1,37 +1,31 @@
 [
   {
-    "bus_info": "1242",
-    "route_id": 2309,
-    "device_id": 186,
-    "driver_id": 52770,
-    "route_ids": "1922,1947,2067,2077,2309",
-    "access_type": 4,
-    "business_id": 5,
-    "device_imei": "358419070064035",
-    "end_stop_id": 4007,
-    "end_latitude": "26.398342348082",
-    "passenger_id": 52768,
-    "end_longitude": "-80.203707604347",
-    "start_stop_id": 3053,
-    "start_latitude": "26.332286192816",
-    "start_longitude": "-80.204156324629"
-  },
-  {
     "bus_info": "1225",
     "route_id": 1760,
     "device_id": 699,
     "driver_id": 53025,
     "route_ids": "1760,1925",
-    "access_type": 4,
     "business_id": 468,
     "device_imei": "866123040208061",
     "end_stop_id": 6108,
     "end_latitude": "26.333132329624",
-    "passenger_id": 52199,
     "end_longitude": "-80.203893033965",
     "start_stop_id": 6107,
     "start_latitude": "26.3394644",
-    "start_longitude": "-80.130717"
+    "start_longitude": "-80.130717",
+    "passengers": [
+      {
+        "passenger_id": 52200,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 52201,
+        "access_type": 4
+      }
+    ],
+    "passenger_date": "2026-11-14",
+    "passenger_id": 52200,
+    "access_type": 4
   },
   {
     "bus_info": "97",
@@ -39,16 +33,151 @@
     "device_id": 890,
     "driver_id": 46514,
     "route_ids": "815,816,817,858,892,911,1591,1592,1601,1636,1672,2005",
-    "access_type": 4,
     "business_id": 5,
     "device_imei": "866123040408745",
     "end_stop_id": 2637,
     "end_latitude": "27.028189262924",
-    "passenger_id": 17780,
     "end_longitude": "-80.407286736254",
     "start_stop_id": 385,
     "start_latitude": "27.019829825557",
-    "start_longitude": "-80.462427111029"
+    "start_longitude": "-80.462427111029",
+    "passengers": [
+      {
+        "passenger_id": 18080,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 18101,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 18105,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 18114,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 18115,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 18116,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 18407,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 18888,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 19266,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 19454,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 20629,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 21404,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 21829,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 23814,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 23862,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 23863,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 23866,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 24094,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 24122,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 24136,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 24152,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 24153,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 24162,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 49316,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 49326,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 50563,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 50632,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 51018,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 51067,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 51807,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 52044,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 52890,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 54969,
+        "access_type": 4
+      }
+    ],
+    "passenger_date": "2026-11-14",
+    "passenger_id": 18080,
+    "access_type": 4
   },
   {
     "bus_info": "1241",
@@ -56,16 +185,31 @@
     "device_id": 931,
     "driver_id": 23176,
     "route_ids": "1006,1520",
-    "access_type": 4,
     "business_id": 5,
     "device_imei": "60cad6f9685313ab",
     "end_stop_id": 4635,
     "end_latitude": "41.438259986772",
-    "passenger_id": 49715,
     "end_longitude": "2.1667291114463",
     "start_stop_id": 4596,
     "start_latitude": "41.439919734104",
-    "start_longitude": "2.1632461521477"
+    "start_longitude": "2.1632461521477",
+    "passengers": [
+      {
+        "passenger_id": 50035,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 50041,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 50042,
+        "access_type": 4
+      }
+    ],
+    "passenger_date": "2026-11-14",
+    "passenger_id": 50035,
+    "access_type": 3
   },
   {
     "bus_info": "22",
@@ -73,16 +217,87 @@
     "device_id": 939,
     "driver_id": 52776,
     "route_ids": "87,189,646,652,742,837,1521,1522,1523",
-    "access_type": 3,
     "business_id": 5,
     "device_imei": "67af5f1091847af1",
     "end_stop_id": 11259,
     "end_latitude": "27.012759999205",
-    "passenger_id": 5966,
     "end_longitude": "-80.462690000002",
     "start_stop_id": 399,
     "start_latitude": "27.143127455196",
-    "start_longitude": "-80.231299362841"
+    "start_longitude": "-80.231299362841",
+    "passengers": [
+      {
+        "passenger_id": 5966,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 7095,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 7794,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 8290,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 8701,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 10203,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 10317,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 11351,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 12003,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 12921,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 13359,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 15814,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 15836,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 16115,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 20701,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 52167,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 52459,
+        "access_type": 4
+      }
+    ],
+    "passenger_date": "2026-11-14",
+    "passenger_id": 5966,
+    "access_type": 3
   },
   {
     "bus_info": "70",
@@ -90,16 +305,147 @@
     "device_id": 940,
     "driver_id": 62,
     "route_ids": "528,614,810,811,878,907,1588,1635",
-    "access_type": 3,
     "business_id": 5,
     "device_imei": "70516047785397b3",
     "end_stop_id": 4649,
     "end_latitude": "27.087879999203",
-    "passenger_id": 8328,
     "end_longitude": "-80.140050000003",
     "start_stop_id": 224,
     "start_latitude": "27.135087707826",
-    "start_longitude": "-80.195235833723"
+    "start_longitude": "-80.195235833723",
+    "passengers": [
+      {
+        "passenger_id": 8328,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 8333,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 8351,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 8378,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 8379,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 9860,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 10320,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 10323,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 10342,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 10344,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 10582,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 10944,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 10950,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 11777,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 12225,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 12655,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 12659,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 12665,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 12666,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 12712,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 13948,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 14314,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 14359,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 15015,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 20068,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 21810,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 47293,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 47490,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 47506,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 49546,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 52600,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 52601,
+        "access_type": 4
+      }
+    ],
+    "passenger_date": "2026-11-14",
+    "passenger_id": 8328,
+    "access_type": 3
   },
   {
     "bus_info": "33",
@@ -107,16 +453,215 @@
     "device_id": 943,
     "driver_id": 95,
     "route_ids": "114,115,116,220,259,342",
-    "access_type": 3,
     "business_id": 5,
     "device_imei": "15734a925a96aaae",
     "end_stop_id": 11020,
     "end_latitude": "27.251519999199",
-    "passenger_id": 14465,
     "end_longitude": "-80.279210000003",
     "start_stop_id": 87,
     "start_latitude": "27.224395919846",
-    "start_longitude": "-80.258476474161"
+    "start_longitude": "-80.258476474161",
+    "passengers": [
+      {
+        "passenger_id": 14465,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 14472,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 14600,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 15276,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 15406,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 15582,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 15599,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 15635,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 16202,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 16213,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 16417,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 16870,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 16875,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 17274,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 17641,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 17882,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 19638,
+        "access_type": 3
+      },
+      {
+        "passenger_id": 20768,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 20910,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 21009,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 21098,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 21270,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 21409,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 21507,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 21927,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 22848,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 22898,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 23920,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 24044,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 24128,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 46571,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 46580,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 47342,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 47642,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 47975,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 47982,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 49095,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 50544,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 50595,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 51077,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 51093,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 52681,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 52682,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 53280,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 53281,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 53872,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 53905,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 54064,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 54820,
+        "access_type": 4
+      }
+    ],
+    "passenger_date": "2026-11-14",
+    "passenger_id": 14465,
+    "access_type": 3
   },
   {
     "bus_info": "1229",
@@ -124,15 +669,57 @@
     "device_id": 950,
     "driver_id": 52962,
     "route_ids": "1836,1838,1839,1905,1907",
-    "access_type": 4,
     "business_id": 5,
     "device_imei": "834ffeb25c36a4cd",
     "end_stop_id": 11030,
     "end_latitude": "26.331362653604",
-    "passenger_id": 51222,
     "end_longitude": "-80.187528771129",
     "start_stop_id": 3053,
     "start_latitude": "26.332286192816",
-    "start_longitude": "-80.204156324629"
+    "start_longitude": "-80.204156324629",
+    "passengers": [
+      {
+        "passenger_id": 51222,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 51223,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 58612,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 66007,
+        "access_type": 4
+      },
+      {
+        "passenger_id": 66013,
+        "access_type": 4
+      }
+    ],
+    "passenger_date": "2026-11-14",
+    "passenger_id": 51222,
+    "access_type": 4
+  },
+  {
+    "bus_info": "1242",
+    "route_id": 2309,
+    "device_id": 186,
+    "driver_id": 52770,
+    "route_ids": "1922,1947,2067,2077,2309",
+    "business_id": 5,
+    "device_imei": "358419070064035",
+    "end_stop_id": 4007,
+    "end_latitude": "26.398342348082",
+    "end_longitude": "-80.203707604347",
+    "start_stop_id": 3053,
+    "start_latitude": "26.332286192816",
+    "start_longitude": "-80.204156324629",
+    "passengers": [],
+    "passenger_date": "2026-11-14",
+    "passenger_id": null,
+    "access_type": null
   }
 ]

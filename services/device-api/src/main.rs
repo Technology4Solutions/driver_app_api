@@ -1,6 +1,6 @@
 use device_api::{admin_router, router, telemetry::Metrics};
 use std::{env, net::SocketAddr};
-use tracing_subscriber::EnvFilter;
+use tracing_subscriber::{filter::filter_fn, prelude::*, EnvFilter};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -9,10 +9,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Err(dotenvy::Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(error.into()),
     }
-    tracing_subscriber::fmt()
-        .json()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| "info,tower_http=debug".into()),
+    let log_level = env::var("LOG_LEVEL").unwrap_or_else(|_| "INFO".into());
+    let debug = match log_level.trim().to_ascii_uppercase().as_str() {
+        "INFO" => false,
+        "DEBUG" => true,
+        _ => return Err("LOG_LEVEL must be INFO or DEBUG".into()),
+    };
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .json()
+                .with_filter(filter_fn(move |metadata| {
+                    log_enabled(metadata.level(), debug)
+                }))
+                .with_filter(EnvFilter::new(if debug { "debug" } else { "info" })),
         )
         .init();
     let bind: SocketAddr = env::var("API_BIND")
@@ -71,4 +81,25 @@ async fn shutdown() {
     tokio::signal::ctrl_c()
         .await
         .expect("install shutdown handler");
+}
+
+fn log_enabled(level: &tracing::Level, debug: bool) -> bool {
+    matches!(*level, tracing::Level::INFO | tracing::Level::ERROR)
+        || (debug && *level == tracing::Level::DEBUG)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn configured_levels_filter_events() {
+        for debug in [false, true] {
+            assert!(log_enabled(&tracing::Level::INFO, debug));
+            assert!(log_enabled(&tracing::Level::ERROR, debug));
+            assert_eq!(log_enabled(&tracing::Level::DEBUG, debug), debug);
+            assert!(!log_enabled(&tracing::Level::WARN, debug));
+            assert!(!log_enabled(&tracing::Level::TRACE, debug));
+        }
+    }
 }

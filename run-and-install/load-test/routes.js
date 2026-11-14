@@ -4,7 +4,7 @@ import exec from 'k6/execution';
 import { SharedArray } from 'k6/data';
 import { check, sleep } from 'k6';
 import { Rate, Counter } from 'k6/metrics';
-import { validateDevice, payload, databaseSaved, mergedIds } from './payloads.js';
+import { validateDevice, payload, databaseSaved, mergedIds, allocatePassengers } from './payloads.js';
 
 const catalog = JSON.parse(open('./services.json'));
 const devices = new SharedArray('devices', () => JSON.parse(open(__ENV.DATA_FILE || '/data/devices.json')));
@@ -23,6 +23,7 @@ if (!__ENV.REAXIUM_API_USER || !__ENV.REAXIUM_API_PASSWORD) throw new Error('API
 if (!__ENV.RUN_ID || !/^[a-zA-Z0-9-]{1,40}$/.test(__ENV.RUN_ID)) throw new Error('RUN_ID must be a unique 1-40 character alphanumeric/hyphen run identifier');
 const dateBase = Date.parse(__ENV.START_DATE || '');
 if (!Number.isFinite(dateBase)) throw new Error('Set START_DATE, for example 2026-10-22T08:00:00Z');
+const passengerAssignments = allocatePassengers(devices.slice(0, vus), steps, iterations, __ENV.START_DATE);
 const savedRate = new Rate('database_saved');
 const queueRate = new Rate('queue_accepted');
 const successRate = new Rate('application_success');
@@ -53,8 +54,8 @@ function post(action, data, d) {
   if (!(isStatus ? success : saved)) exec.test.abort(`${action}: save/queue failed or outcome unknown; stopping without retries (trace ${data.trace_id})`);
 }
 export default function () {
-  const d = devices[exec.vu.idInTest - 1];
   const iteration = exec.vu.iterationInScenario;
+  const d = {...devices[exec.vu.idInTest - 1], ...passengerAssignments[exec.vu.idInTest - 1][iteration]};
   const start = dateBase + iteration * Math.max(120000, steps.length * 60000);
   const trace = `load-${__ENV.RUN_ID}-${exec.vu.idInTest}-${iteration}`;
   // Build the complete trip before writing, including date validation.

@@ -3,6 +3,29 @@ const $ = id => document.getElementById(id);
 let configuredCredentials = false;
 let services = {};
 let token, ready = false, busy = false, submitting = false;
+const settingsKey = 'driver-load-test-settings-v1';
+const settingsFields = ['service', 'vus', 'journeys', 'date', 'duration'];
+function saveSettings() {
+  try {
+    localStorage.setItem(settingsKey, JSON.stringify(Object.fromEntries(settingsFields.map(id => [id, $(id).value]))));
+  } catch (_) { /* The runner remains usable when browser storage is unavailable. */ }
+}
+function restoreSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(settingsKey));
+    if (!saved || typeof saved !== 'object') return;
+    for (const id of settingsFields) {
+      if (typeof saved[id] !== 'string') continue;
+      if (id === 'service' && !Object.hasOwn(services, saved[id])) continue;
+      $(id).value = saved[id];
+      if (id === 'vus' && Number($(id).value) > Number($(id).max)) $(id).value = $(id).max;
+    }
+  } catch (_) { /* Ignore unavailable storage or invalid saved settings. */ }
+  estimate();
+}
+$('form').addEventListener('input', event => {
+  if (settingsFields.includes(event.target.id)) saveSettings();
+});
 function buttons() { $('start').disabled = !ready || busy || submitting; $('stop').disabled = !ready || !busy || submitting; }
 function estimate() {
   const selected = services[$('service').value];
@@ -12,7 +35,7 @@ function estimate() {
   if (selected) {
     details.push(selected.steps ? steps.map(step => services[step].path).join(' → ') : selected.path);
     if (steps.some(step => step.includes('Merge'))) details.push('Dataset needs at least two related routes per device.');
-    if (steps.includes('executeAnAccessOfAUserInABus')) details.push('Dataset needs a passenger ID and matching access method.');
+    if (steps.includes('executeAnAccessOfAUserInABus')) details.push('Each repetition needs a different passenger (users.user_type_id = 2) with a matching access method. Data is refreshed and checked automatically before k6 starts.');
     if (steps.includes('deviceStatus')) details.push('DeviceStatus success confirms queue acceptance; persistence happens asynchronously.');
   }
   $('service-details').textContent = details.join(' ');
@@ -21,11 +44,11 @@ function populateServices(catalog) {
   services = catalog;
   $('service').replaceChildren();
   for (const [label, names] of [
-    ['Scenarios', Object.keys(catalog).filter(name => catalog[name].steps)],
+    ['Scenarios', Object.keys(catalog).filter(name => catalog[name].steps && name !== 'beginRouteAccess')],
     ['Device status', ['deviceStatus']],
     ['Route traffic', Object.keys(catalog).filter(name => catalog[name].namespace === 'DeviceTraffic')],
     ['Alarm notifications', Object.keys(catalog).filter(name => catalog[name].namespace === 'Notification')],
-    ['Passenger access', Object.keys(catalog).filter(name => catalog[name].namespace === 'UserAccess')],
+    ['Passenger access', Object.keys(catalog).filter(name => catalog[name].namespace === 'UserAccess' || name === 'beginRouteAccess')],
   ]) {
     const group = document.createElement('optgroup');
     group.label = label;
@@ -75,10 +98,10 @@ function metrics(summary) {
   }
 }
 function render(state) {
-  busy=['starting','running'].includes(state.status);buttons();$('status').textContent=state.status;
+  busy=['preparing','starting','running'].includes(state.status);buttons();$('status').textContent=state.status;
   $('run-id').textContent=state.id ? `Run ${state.id.slice(0,8)}${state.exit_code == null ? '' : ' · exit '+state.exit_code}` : 'No active run';
   const logs=$('logs'), bottom=logs.scrollHeight-logs.scrollTop-logs.clientHeight<40;
-  logs.textContent=state.logs || (busy ? 'Starting k6… Docker may need to download its image.' : 'Ready when you are. Start with one device and one repetition.');
+  logs.textContent=state.logs || (state.status === 'preparing' ? 'Preparing test data and checking availability before k6 starts…' : busy ? 'Starting k6… Docker may need to download its image.' : 'Ready when you are. Start with one device and one repetition.');
   if(bottom) logs.scrollTop=logs.scrollHeight;
   metrics(state.summary);
 }
@@ -92,4 +115,4 @@ $('form').addEventListener('submit',async event=>{
 });
 $('stop').addEventListener('click',async()=>{submitting=true;buttons();try{await request('/api/stop');$('status').textContent='Stopping…';}catch(error){$('error').textContent=error.message;}finally{submitting=false;buttons();}});
 async function poll(){try{render(await request('/api/state'));ready=true;buttons();}catch(error){ready=false;buttons();$('status').textContent='Disconnected';}setTimeout(poll,1500);}
-(async()=>{try{const config=await request('/api/config');populateServices(config.services);token=config.token;configuredCredentials=config.credentials_configured;if(configuredCredentials){$('credentials').hidden=true;$('credential-note').hidden=false;$('username').required=false;$('password').required=false;}$('target').textContent=`${config.api_url} · ${config.devices} devices in ${config.dataset}`;$('vus').max=config.devices;ready=true;buttons();poll();}catch(error){$('error').textContent=error.message;}})();
+(async()=>{try{const config=await request('/api/config');populateServices(config.services);token=config.token;configuredCredentials=config.credentials_configured;if(configuredCredentials){$('credentials').hidden=true;$('credential-note').hidden=false;$('username').required=false;$('password').required=false;}$('target').textContent=`${config.api_url} · ${config.devices} devices in ${config.dataset}`;$('vus').max=config.devices;restoreSettings();ready=true;buttons();poll();}catch(error){$('error').textContent=error.message;}})();

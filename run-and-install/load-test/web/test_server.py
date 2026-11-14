@@ -101,7 +101,7 @@ class Tests(unittest.TestCase):
             if command[1] == 'logs':
                 stdout = 'test-password sample output'
             return SimpleNamespace(returncode=0, stdout=stdout, stderr='')
-        with patch('server.subprocess.run', side_effect=docker):
+        with patch.object(self.runner, 'prepare', return_value=self.runner.dataset), patch('server.subprocess.run', side_effect=docker):
             self.runner.start(self.data)
             self.runner.thread.join(3)
         state = self.runner.snapshot()
@@ -143,6 +143,39 @@ class Tests(unittest.TestCase):
                 self.assertEqual(thread.call_args.kwargs['args'][0]['SERVICE'], service)
                 thread.return_value.start.assert_called_once()
 
+    def test_preparation_failure_never_creates_k6_container(self):
+        commands = []
+        def failed(command, **kwargs):
+            commands.append(command)
+            return SimpleNamespace(returncode=1, stdout='Not enough eligible devices', stderr='')
+        with patch('server.subprocess.run', side_effect=failed):
+            self.runner.start(self.data)
+            self.runner.thread.join(3)
+        self.assertEqual(self.runner.snapshot()['status'], 'failed')
+        self.assertIn('no API requests sent', self.runner.snapshot()['logs'])
+        self.assertFalse(any(command[:2] == ['docker', 'create'] for command in commands))
+        self.assertIn('--service', commands[0])
+        self.assertIn('--iterations', commands[0])
+
+    def test_prepared_snapshot_is_mounted_and_preparation_logs_preserved(self):
+        commands = []
+        def mock(command, **kwargs):
+            commands.append(command)
+            if any(arg.endswith('/prepare-run.py') for arg in command):
+                output = Path(command[command.index('--output') + 1])
+                output.write_text('[{"device_id":2}]')
+                return SimpleNamespace(returncode=0, stdout='Data ready before k6\n', stderr='')
+            if command[1] == 'inspect':
+                return SimpleNamespace(returncode=0, stdout='{"Running":false,"ExitCode":0}', stderr='')
+            return SimpleNamespace(returncode=0, stdout='', stderr='')
+        with patch('server.subprocess.run', side_effect=mock):
+            self.runner.start(self.data)
+            self.runner.thread.join(3)
+        self.assertEqual(self.runner.snapshot()['status'], 'passed')
+        self.assertIn('Data ready before k6', self.runner.snapshot()['logs'])
+        create = next(c for c in commands if c[:2] == ['docker', 'create'])
+        self.assertTrue(any('devices.json,dst=/data/devices.json' in arg and str(self.runner.dataset) not in arg for arg in create))
+
     def test_python35_compatibility_and_random_tokens(self):
         from server import token_urlsafe
         source = Path(__file__).with_name('server.py').read_text()
@@ -182,7 +215,7 @@ class Tests(unittest.TestCase):
             if command[1] == 'start':
                 self.runner.stop()
             return SimpleNamespace(returncode=0, stdout=json.dumps({'Running':False, 'ExitCode':137}), stderr='')
-        with patch('server.subprocess.run', side_effect=docker):
+        with patch.object(self.runner, 'prepare', return_value=self.runner.dataset), patch('server.subprocess.run', side_effect=docker):
             self.runner.start(self.data)
             self.runner.thread.join(3)
         self.assertEqual(self.runner.snapshot()['status'], 'stopped')
