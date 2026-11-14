@@ -133,6 +133,31 @@ class Tests(unittest.TestCase):
         with patch.dict('os.environ', {'REAXIUM_API_USER': 'override'}, clear=True):
             self.assertEqual(load_credentials(env_file)['REAXIUM_API_USER'], 'override')
 
+    def test_vault_config_reaches_preparation_without_dotenv_or_secret_arguments(self):
+        config = Path(self.temp.name, 'runtime-config.json')
+        config.write_text(json.dumps(dict(
+            SCHOOL_BUS_DATASOURCE_URL='jdbc:mysql://dev-db:3306/school',
+            SCHOOL_BUS_DATASOURCE_USERNAME='vault-user',
+            SCHOOL_BUS_DATASOURCE_PASSWORD="fixture#password$with'quotes",
+            REAXIUM_API_USER='vault-api-user', REAXIUM_API_PASSWORD='vault-api-password')))
+        self.runner = Runner(self.runner.dataset, self.runner.api_url,
+                             Path(self.temp.name, 'nonexistent.env'), config)
+        with patch.object(self.runner, 'execute') as execute:
+            self.runner.start(self.data)
+            self.runner.thread.join(3)
+        env = execute.call_args.args[0]
+        self.assertEqual(env['REAXIUM_API_USER'], 'vault-api-user')
+        self.assertNotIn('DB_PASSWORD', env)
+        with patch('server.subprocess.run', return_value=SimpleNamespace(returncode=0, stdout='', stderr='')) as run:
+            self.runner.prepare(env, Path(self.temp.name, 'prepared.json'), lambda line: None)
+        command = run.call_args.args[0]
+        self.assertEqual(command[command.index('--config-file') + 1], str(config))
+        self.assertFalse(any('nonexistent.env,dst=' in arg for arg in command))
+        self.assertNotIn('fixture#password', ' '.join(command))
+        response = self.request()
+        self.assertNotIn(b'vault-user', response)
+        self.assertNotIn(b'vault-api-password', response)
+
     def test_every_catalog_service_is_available_in_config_and_launchable(self):
         response = self.request()
         for service in SERVICES:

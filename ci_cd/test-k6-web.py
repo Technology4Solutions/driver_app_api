@@ -42,6 +42,7 @@ class DeploymentTests(unittest.TestCase):
             shutil.copy(ROOT / 'k6-web.sh', root / 'ci_cd/k6-web.sh')
             (root / '.k6-web').mkdir()
             (root / '.k6-web/access-token').write_text('test-access-token-never-log')
+            (root / '.k6-web/runtime-config.json').write_text('{}')
             binaries = root / 'bin'
             binaries.mkdir()
             mock = '''#!/usr/bin/env python3
@@ -72,6 +73,8 @@ if Path(sys.argv[0]).name == 'docker':
             results = str(root / '.k6-web/results')
             self.assertIn('type=bind,src={0},dst={0}'.format(results), run)
             self.assertIn('TMPDIR=' + results, run)
+            self.assertIn('--config-file', run)
+            self.assertIn(str(root / '.k6-web/runtime-config.json'), run)
             self.assertIn('type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock', run)
             self.assertNotIn('test-access-token-never-log', log.read_text() + result.stdout)
             check = next(i for i, c in enumerate(calls) if '--check-config' in c)

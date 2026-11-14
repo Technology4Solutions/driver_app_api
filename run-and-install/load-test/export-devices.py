@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+from runtime_config import database_settings, load_runtime_config
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -63,7 +64,7 @@ def env_value(raw, values):
 
 def read_env(path):
     values = {}
-    for number, line in enumerate(path.read_text().splitlines(), 1):
+    for number, line in enumerate(path.read_text().splitlines() if path.exists() else [], 1):
         if not line.strip() or line.lstrip().startswith('#'):
             continue
         key, sep, value = line.partition('=')
@@ -76,8 +77,9 @@ def read_env(path):
             # Never include the source line: it may contain a password.
             raise ValueError('Invalid .env value for %s at line %d' % (key, number)) from None
         values.setdefault(key, parsed)
-    values.update({key: value for key, value in os.environ.items() if key.startswith('DB_')})
-    return {key: value for key, value in values.items() if key.startswith('DB_')}
+    values.update({key: value for key, value in os.environ.items()
+                   if key.startswith(('DB_', 'SCHOOL_BUS_DATASOURCE_'))})
+    return database_settings(values)
 
 
 def query(config, sql):
@@ -95,6 +97,7 @@ def query(config, sql):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--env-file', type=Path, default=ROOT / '.env')
+    parser.add_argument('--config-file', type=Path, help='Private Jenkins/Vault JSON; replaces .env settings')
     parser.add_argument('--passenger-date', type=date.fromisoformat, default=datetime.now(ZoneInfo('Africa/Casablanca')).date(),
                         help='Simulated test date; exclude passengers already recorded on this date')
     parser.add_argument('--limit', type=int, default=1000)
@@ -102,7 +105,7 @@ def main():
     args = parser.parse_args()
     if args.limit < 1:
         parser.error('--limit must be positive')
-    config = read_env(args.env_file)
+    config = load_runtime_config(args.config_file) if args.config_file else read_env(args.env_file)
     # One candidate per device, with active relationships and a real driver.
     # Min/max stop IDs are representative linked stops, not geographic route order.
     sql = Path(__file__).with_name('export-devices.sql').read_text()

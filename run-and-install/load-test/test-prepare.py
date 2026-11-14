@@ -2,6 +2,10 @@
 import importlib.util
 from pathlib import Path
 import unittest
+from unittest.mock import patch
+import json
+import sys
+import tempfile
 
 spec = importlib.util.spec_from_file_location('prepare_run', Path(__file__).with_name('prepare-run.py'))
 prepare = importlib.util.module_from_spec(spec)
@@ -17,6 +21,24 @@ def device(id, passengers):
 
 
 class PreparationTests(unittest.TestCase):
+    def test_cli_forwards_vault_file_to_exporter(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, output, config = (root / name for name in ('source.json', 'prepared.json', 'vault.json'))
+            source.write_text(json.dumps([device(1, [10])]))
+            config.write_text('{}')
+
+            def export(command, **kwargs):
+                self.assertEqual(command[command.index('--config-file') + 1], str(config))
+                Path(command[command.index('--output') + 1]).write_text(source.read_text())
+
+            args = ['prepare-run.py', '--source', str(source), '--output', str(output),
+                    '--config-file', str(config), '--service', 'beginRouteAccess', '--vus', '1',
+                    '--iterations', '1', '--start', '2026-11-14T08:00:00Z']
+            with patch.object(sys, 'argv', args), patch.object(prepare.subprocess, 'run', side_effect=export):
+                prepare.main()
+            self.assertEqual(json.loads(output.read_text())[0]['passenger_id'], 10)
+
     def test_selects_devices_with_enough_passengers(self):
         rows = [device(1, [10, 11]), device(2, [20, 21, 22]), device(3, [30, 31, 32])]
         result = prepare.select(rows, [prepare.ACCESS], 2, 3, '2026-11-14')

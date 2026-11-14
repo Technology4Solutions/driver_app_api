@@ -24,8 +24,10 @@ case "$action" in
     host=${2:?Public hostname or IP required}
     [[ "$host" =~ ^[A-Za-z0-9.-]+$ ]] || { echo 'Invalid public host' >&2; exit 1; }
     [[ -s .k6-web/access-token ]] || { echo 'Missing Jenkins-provided runner access token' >&2; exit 1; }
+    [[ -s .k6-web/runtime-config.json ]] || { echo 'Missing Jenkins-provided Vault runner configuration' >&2; exit 1; }
     chmod 700 .k6-web
     chmod 600 .k6-web/access-token
+    chmod 600 .k6-web/runtime-config.json
     project_dir=$(pwd -P)
     [[ "$project_dir" =~ ^/[A-Za-z0-9_./-]+$ ]] || exit 1
     mkdir -p .k6-web/results
@@ -42,6 +44,7 @@ case "$action" in
              --bind 0.0.0.0 --public-host "$host"
              --public-origin "${K6_WEB_PUBLIC_ORIGIN:-https://dev-driver-app-k6.reaxium.com}"
              --access-token-file "$project_dir/.k6-web/access-token")
+    command+=(--config-file "$project_dir/.k6-web/runtime-config.json")
     docker run --rm "${identity[@]}" "${mounts[@]}" "$image" "${command[@]}" --check-config
     docker run --rm "${identity[@]}" --group-add "$(stat -c '%g' /var/run/docker.sock)" \
       --mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock \

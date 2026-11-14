@@ -7,6 +7,19 @@ python3 run-and-install/load-test/export-devices.py --limit 1000
 ```
 
 The exporter reads connection settings from `.env`; override with `--env-file PATH`.
+Local preparation also accepts the same datasource names used in Vault:
+
+```dotenv
+SCHOOL_BUS_DATASOURCE_URL=jdbc:mysql://127.0.0.1:3306/school_bus
+SCHOOL_BUS_DATASOURCE_USERNAME=local_user
+SCHOOL_BUS_DATASOURCE_PASSWORD='local_password'
+```
+
+Put these in the local `.env` for the Docker web runner, or export them when
+running the exporter directly. Existing `DB_*` settings take precedence over
+the corresponding `SCHOOL_BUS_DATASOURCE_*` settings, matching the API's mapping;
+remove conflicting `DB_*` settings to switch entirely to the shared names.
+Within either naming scheme, exported environment values override file values.
 Embedded `#` characters in passwords are preserved; an unquoted comment begins
 after whitespace. Single quotes preserve literal `$` characters. Existing `DB_*`
 environment variables take precedence over file values, as in the API.
@@ -437,7 +450,17 @@ hours. Database availability is checked again for every run; the same users are
 excluded once their events have been saved on that date.
 
 CLI preparation reads the project `.env` by default; set `LOAD_TEST_ENV_FILE` to
-use another configuration file. The web runner uses its `--env-file` setting.
+use another configuration file. The local web runner uses its `--env-file` setting.
+For DEV, Jenkins reads `kv/reaxium_ci/device_api/<CLIENT>_<ENVIRONMENT>` and
+provisions `.k6-web/runtime-config.json` (directory mode 700, file mode 600).
+The web runner and preparation helper use `--config-file` to read that private
+JSON directly: `SCHOOL_BUS_DATASOURCE_URL`, `SCHOOL_BUS_DATASOURCE_USERNAME`,
+`SCHOOL_BUS_DATASOURCE_PASSWORD`, `REAXIUM_API_USER`, and `REAXIUM_API_PASSWORD`.
+DEV does not fall back to `.env` database credentials. JSON preserves raw Vault
+passwords without shell or dotenv expansion. Credentials are not sent to the
+browser or included in Docker command arguments. Redeploy with Jenkins to
+provision this file and restart the runner; updating source alone is insufficient.
+After Vault credentials change, redeploy to refresh the private configuration.
 The web image includes the MySQL client and runs preparation in a helper container
 with host networking, matching k6's access to local database tunnels. Rebuild and
 restart the web runner to apply these changes; the API image does not need rebuilding.

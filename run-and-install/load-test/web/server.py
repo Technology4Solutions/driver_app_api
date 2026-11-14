@@ -13,11 +13,14 @@ import shlex
 import subprocess
 import tempfile
 import threading
+import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT.parent))
+from runtime_config import load_runtime_config
 SERVICES = json.loads((ROOT.parent / 'services.json').read_text())
 
 
@@ -48,7 +51,7 @@ def load_credentials(path):
 
 
 class Runner:
-    def __init__(self, dataset, api_url, env_file=None):
+    def __init__(self, dataset, api_url, env_file=None, config_file=None):
         self.dataset = Path(dataset).resolve()
         devices = json.loads(self.dataset.read_text())
         if not isinstance(devices, list) or not devices:
@@ -56,7 +59,10 @@ class Runner:
         self.count = len(devices)
         self.api_url = api_url
         self.env_file = Path(env_file) if env_file is not None else ROOT.parents[2] / '.env'
-        self.credentials = load_credentials(env_file) if env_file is not None else {}
+        self.config_file = Path(config_file).resolve() if config_file is not None else None
+        self.runtime_config = load_runtime_config(self.config_file) if self.config_file else {}
+        self.credentials = ({key: self.runtime_config[key] for key in ('REAXIUM_API_USER', 'REAXIUM_API_PASSWORD')}
+                            if self.config_file else load_credentials(env_file) if env_file is not None else {})
         self.lock = threading.RLock()
         self.state = {'status': 'idle', 'logs': '', 'summary': None}
         self.cancel = threading.Event()
@@ -116,12 +122,14 @@ class Runner:
                    '--user', '%s:%s' % (os.getuid(), os.getgid()),
                    '--mount', 'type=bind,src=%s,dst=%s,readonly' % (ROOT.parents[2], ROOT.parents[2]),
                    '--mount', 'type=bind,src=%s,dst=%s,readonly' % (self.dataset, self.dataset),
-                   '--mount', 'type=bind,src=%s,dst=%s,readonly' % (self.env_file, self.env_file),
+                   '--mount', 'type=bind,src=%s,dst=%s,readonly' % (self.config_file or self.env_file, self.config_file or self.env_file),
                    '--mount', 'type=bind,src=%s,dst=%s' % (output.parent, output.parent),
                    'driver-app-k6-web:local', str(ROOT.parent / 'prepare-run.py'),
                    '--source', str(self.dataset), '--output', str(output),
                    '--env-file', str(self.env_file), '--service', env['SERVICE'],
                    '--vus', env['VUS'], '--iterations', env['JOURNEYS'], '--start', env['START_DATE']]
+        if self.config_file:
+            command.extend(['--config-file', str(self.config_file)])
         result = subprocess.run(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 universal_newlines=True, timeout=240)
         log(result.stdout + result.stderr)
@@ -133,6 +141,8 @@ class Runner:
         name = 'driver-k6-web-' + env['RUN_ID']
         secret_values = [env['REAXIUM_API_PASSWORD'], env['REAXIUM_API_USER'],
                          base64.b64encode((env['REAXIUM_API_USER'] + ':' + env['REAXIUM_API_PASSWORD']).encode()).decode()]
+        if self.config_file:
+            secret_values.extend(self.runtime_config[key] for key in ('DB_PASSWORD', 'DB_USER'))
 
         def log(line):
             for value in sorted(secret_values, key=len, reverse=True):
@@ -289,6 +299,7 @@ def main():
     parser.add_argument('--port', type=int, default=5665)
     parser.add_argument('--api-url', default='http://127.0.0.1:8080')
     parser.add_argument('--env-file', type=Path, default=ROOT.parents[2] / '.env')
+    parser.add_argument('--config-file', type=Path, help='Private Jenkins/Vault configuration JSON')
     parser.add_argument('--dataset', type=Path, default=ROOT.parent.parent / 'devices.local.json')
     args = parser.parse_args()
     if args.bind == '0.0.0.0' and not args.public_host:
@@ -307,7 +318,7 @@ def main():
     url = urlsplit(args.api_url)
     if url.scheme not in ('http', 'https') or not url.hostname or url.username or url.password or url.query or url.fragment:
         parser.error('--api-url must be an HTTP(S) API URL without credentials, query, or fragment')
-    runner = Runner(args.dataset, args.api_url, args.env_file)
+    runner = Runner(args.dataset, args.api_url, args.env_file, args.config_file)
     if args.check_config:
         print('k6 web configuration validated; no server or test started', flush=True)
         return

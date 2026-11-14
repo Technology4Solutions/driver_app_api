@@ -55,18 +55,38 @@ node {
             }
             if (target == 'DEV') {
                 stage('Deploy k6 Web Runner') {
-                    // A dedicated browser login; never reuse the API or Vault token.
-                    withCredentials([string(credentialsId: 'k6-web-access-token', variable: 'K6_WEB_TOKEN')]) {
-                        def tokenFile = "${pwd(tmp: true)}/k6-web-access-token"
-                        try {
-                            writeFile file: tokenFile, text: env.K6_WEB_TOKEN
-                            withEnv(["K6_TOKEN_FILE=${tokenFile}"]) { sh 'chmod 600 "$K6_TOKEN_FILE"' }
-                            if (!(env.HOST_IP ==~ /[A-Za-z0-9.-]+/)) error('Invalid k6 web public host')
-                            sshCommand remote: remote, command: "mkdir -p '${directory}/.k6-web' && chmod 700 '${directory}/.k6-web'"
-                            sshPut remote: remote, from: tokenFile, into: "${directory}/.k6-web"
-                            sshCommand remote: remote, command: "cd '${directory}' && mv .k6-web/k6-web-access-token .k6-web/access-token && chmod 600 .k6-web/access-token && bash ci_cd/k6-web.sh start '${env.HOST_IP}'"
-                        } finally {
-                            withEnv(["K6_TOKEN_FILE=${tokenFile}"]) { sh 'rm -f "$K6_TOKEN_FILE"' }
+                    withVault(configuration: [vaultUrl: 'http://vault:8200', vaultCredentialId: 'vault-token', timeout: 60], vaultSecrets: [
+                        [path: "kv/reaxium_ci/device_api/${client}_${target}", engineVersion: 2, secretValues: [
+                            [envVar: 'K6_DB_URL', vaultKey: 'SCHOOL_BUS_DATASOURCE_URL'],
+                            [envVar: 'K6_DB_USER', vaultKey: 'SCHOOL_BUS_DATASOURCE_USERNAME'],
+                            [envVar: 'K6_DB_PASSWORD', vaultKey: 'SCHOOL_BUS_DATASOURCE_PASSWORD'],
+                            [envVar: 'K6_API_USER', vaultKey: 'REAXIUM_API_USER'],
+                            [envVar: 'K6_API_PASSWORD', vaultKey: 'REAXIUM_API_PASSWORD']]]
+                    ]) {
+                        // A dedicated browser login; never reuse the API or Vault token.
+                        withCredentials([string(credentialsId: 'k6-web-access-token', variable: 'K6_WEB_TOKEN')]) {
+                            def tokenFile = "${pwd(tmp: true)}/k6-web-access-token"
+                            def runtimeFile = "${pwd(tmp: true)}/runtime-config.json"
+                            try {
+                                writeFile file: tokenFile, text: env.K6_WEB_TOKEN
+                                writeFile file: runtimeFile, text: groovy.json.JsonOutput.toJson([
+                                    SCHOOL_BUS_DATASOURCE_URL: env.K6_DB_URL,
+                                    SCHOOL_BUS_DATASOURCE_USERNAME: env.K6_DB_USER,
+                                    SCHOOL_BUS_DATASOURCE_PASSWORD: env.K6_DB_PASSWORD,
+                                    REAXIUM_API_USER: env.K6_API_USER,
+                                    REAXIUM_API_PASSWORD: env.K6_API_PASSWORD
+                                ])
+                                withEnv(["K6_CONFIG_FILE=${runtimeFile}"]) { sh 'chmod 600 "$K6_CONFIG_FILE"' }
+                                withEnv(["K6_TOKEN_FILE=${tokenFile}"]) { sh 'chmod 600 "$K6_TOKEN_FILE"' }
+                                if (!(env.HOST_IP ==~ /[A-Za-z0-9.-]+/)) error('Invalid k6 web public host')
+                                sshCommand remote: remote, command: "mkdir -p '${directory}/.k6-web' && chmod 700 '${directory}/.k6-web'"
+                                sshPut remote: remote, from: tokenFile, into: "${directory}/.k6-web"
+                                sshPut remote: remote, from: runtimeFile, into: "${directory}/.k6-web"
+                                sshCommand remote: remote, command: "cd '${directory}' && mv .k6-web/k6-web-access-token .k6-web/access-token && chmod 600 .k6-web/access-token .k6-web/runtime-config.json && bash ci_cd/k6-web.sh start '${env.HOST_IP}'"
+                            } finally {
+                                withEnv(["K6_TOKEN_FILE=${tokenFile}"]) { sh 'rm -f "$K6_TOKEN_FILE"' }
+                                withEnv(["K6_CONFIG_FILE=${runtimeFile}"]) { sh 'rm -f "$K6_CONFIG_FILE"' }
+                            }
                         }
                     }
                 }

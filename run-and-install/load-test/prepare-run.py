@@ -123,6 +123,7 @@ def main():
     parser.add_argument('--source', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--env-file', type=Path, default=ROOT.parents[1] / '.env')
+    parser.add_argument('--config-file', type=Path)
     parser.add_argument('--service', required=True)
     parser.add_argument('--vus', type=int, required=True)
     parser.add_argument('--iterations', type=int, required=True)
@@ -146,6 +147,8 @@ def main():
             exported = Path(directory, 'devices.json')
             command = [sys.executable, str(ROOT / 'export-devices.py'), '--env-file', str(args.env_file),
                        '--passenger-date', args.start[:10], '--output', str(exported)]
+            if args.config_file:
+                command.extend(['--config-file', str(args.config_file)])
             subprocess.run(command, check=True, timeout=180)
             allowed = {int(d['device_id']) for d in source}
             rows = [d for d in json.loads(exported.read_text()) if int(d['device_id']) in allowed]
