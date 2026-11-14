@@ -148,6 +148,7 @@ with open(os.environ['MOCK_LOG'],'a') as f:f.write(' '.join(a)+'\\n')
 if os.getenv('MOCK_FAIL') and a[0]=='push':sys.exit(1)
 if os.getenv('MOCK_NO_COMPOSE') and a[0]=='compose':sys.exit(1)
 if os.getenv('MOCK_NO_STACK_CONFIG') and a[:2]==['stack','config']:sys.exit(125)
+if '--status' in a:sys.exit(125)
 if os.getenv('MOCK_PULL_FAIL') and a[0]=='pull':sys.exit(1)
 if os.getenv('MOCK_SECRET_MISSING') and a[:2]==['secret','inspect']:sys.exit(1)
 if os.getenv('MOCK_MONITORING_FAIL') and a[:2]==['stack','deploy'] and a[-1].endswith('_monitoring'):sys.exit(1)
@@ -161,12 +162,18 @@ if a[0]=='ps':
 if a[0]=='inspect':print('healthy')
 if os.getenv('MOCK_DEPENDENCY_PAUSED') and a[:2]==['service','inspect'] and a[-1].endswith('driver-app-rabbitmq'):print('paused');sys.exit(0)
 if a[:2]==['service','ls'] and not any('_monitoring' in x for x in a) and not os.getenv('MOCK_EMPTY_STACK'):print('driver_app_api_stack_driver-app-api')
+if a[:2]==['service','ls']:
+ for arg in a:
+  if arg.startswith('name=') and arg.endswith('_monitoring_alloy'):
+   pending=Path(os.environ['MOCK_LOG']+'.alloy-checked')
+   if os.getenv('MOCK_ALLOY_INITIAL_PENDING') and not pending.exists():
+    pending.touch();print(arg[5:]+' 0/1')
+   else:print(arg[5:]+' 1/1')
 if a[0]=='info':print('active' if 'LocalNodeState' in a[-1] else 'true')
 if a[:2]==['stack','services']:
  for name in ['driver-app-api','driver-app-rabbitmq','driver-app-redis']:print('driver_app_api_stack_'+name+' 1/1')
 if a[:2]==['service','inspect'] and '--format' in a:
  fmt=a[a.index('--format')+1]
- if 'ServiceStatus.RunningTasks' in fmt:print('1/1');sys.exit(0)
  if os.getenv('MOCK_MONITORING_PAUSED') and '_monitoring_' in a[-1]:print('paused');sys.exit(0)
  print('reaxiumapps/driver_app_api:1.2.3@sha256:mock' if 'ContainerSpec.Image' in fmt else os.getenv('MOCK_STATE','completed'))
 ''')
@@ -266,7 +273,8 @@ if a[:2]==['service','inspect'] and '--format' in a:
         calls = self.log.read_text()
         for component in ('loki', 'alloy'):
             self.assertIn('--force custom_stack_monitoring_' + component, calls)
-        self.assertIn('{{.ServiceStatus.RunningTasks}}/{{.ServiceStatus.DesiredTasks}} --status custom_stack_monitoring_alloy', calls)
+        self.assertIn('service ls --filter name=custom_stack_monitoring_alloy --format {{.Name}} {{.Replicas}}', calls)
+        self.assertNotIn('--status', calls)
 
     def test_missing_log_configuration_fails_preflight(self):
         (self.path / 'monitoring/alloy.alloy').unlink()
@@ -274,6 +282,13 @@ if a[:2]==['service','inspect'] and '--format' in a:
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('Missing monitoring file: monitoring/alloy.alloy', result.stderr)
         self.assertNotIn('stack deploy --with-registry-auth', self.log.read_text())
+
+    def test_global_log_collector_waits_for_replicas_without_status_flag(self):
+        result = self.run_script('monitoring.sh', 'start', MOCK_ALLOY_INITIAL_PENDING='1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.log.read_text()
+        self.assertEqual(calls.count('service ls --filter name=driver_app_api_stack_monitoring_alloy'), 2)
+        self.assertNotIn('--status', calls)
 
     def test_monitoring_drains_prometheus_before_replacement(self):
         result = self.run_script('monitoring.sh', 'start')

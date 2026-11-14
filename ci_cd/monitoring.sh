@@ -82,12 +82,14 @@ case "$action" in
           ready=false
         fi
       done
-      # Alloy is global, so verify health on every node through its task status.
+      # Check global replica convergence using service ls, supported by older
+      # Docker CLIs that do not implement service inspect --status.
       alloy_service="${monitoring_stack}_alloy"
       alloy_state=$(docker service inspect --format '{{if .UpdateStatus}}{{.UpdateStatus.State}}{{end}}' "$alloy_service")
       case "$alloy_state" in paused|rollback*) echo "Monitoring update failed: $alloy_service ($alloy_state)" >&2; exit 1 ;; esac
       [[ -z "$alloy_state" || "$alloy_state" == completed ]] || ready=false
-      alloy_counts=$(docker service inspect --format '{{.ServiceStatus.RunningTasks}}/{{.ServiceStatus.DesiredTasks}}' --status "$alloy_service")
+      alloy_counts=$(docker service ls --filter "name=$alloy_service" --format '{{.Name}} {{.Replicas}}' |
+        awk -v service="$alloy_service" '$1 == service {print $2}')
       if [[ "$alloy_counts" =~ ^([0-9]+)/([0-9]+)$ ]]; then
         [[ "${BASH_REMATCH[1]}" == "${BASH_REMATCH[2]}" && "${BASH_REMATCH[2]}" != 0 ]] || ready=false
       else

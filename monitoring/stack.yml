@@ -87,6 +87,8 @@ services:
       retries: 20
     deploy:
       replicas: 1
+      update_config: {parallelism: 1, order: stop-first, failure_action: pause}
+      rollback_config: {parallelism: 1, order: stop-first}
       placement:
         constraints: ["node.id == ${MONITORING_NODE_ID}"]
       restart_policy: {condition: on-failure}
