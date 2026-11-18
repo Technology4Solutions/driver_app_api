@@ -329,6 +329,9 @@ The CLI and web page share `services.json`. Select any of these `SERVICE` values
 
 | SERVICE | Endpoint |
 |---|---|
+| `bulkUserAccess` | `/api/DeviceAccess/bulkUserAccess` |
+| `saveDeviceTrafficAttendance` | `/api/Device/saveDeviceTrafficAttendance` |
+| `saveTrafficAttendance` | `/api/Device/saveTrafficAttendance` |
 | `deviceStatus` | `/device/DeviceStatus/update` |
 | `beginARoute` | `/DeviceTraffic/beginARoute` |
 | `endARoute` | `/DeviceTraffic/endARoute` |
@@ -344,7 +347,7 @@ The CLI and web page share `services.json`. Select any of these `SERVICE` values
 | `executeAnAccessOfAUserInABus` | `/UserAccess/executeAnAccessOfAUserInABus` |
 
 `SERVICE=journey` remains begin + end. `SERVICE=allServices` sends each of the
-13 business requests once per iteration, in the order in `services.json`. One VU
+16 business requests once per iteration, in the order in `services.json`. One VU
 owns one device; all requests in an iteration share a unique trace. Start with:
 
 ```bash
@@ -386,8 +389,8 @@ create automatic passenger dropoffs for the shared trace.
 
 HTTP 200 alone does not pass a test. Every endpoint has an application-success
 threshold. `database_saved` covers synchronous services; `queue_accepted` covers
-DeviceStatus, whose successful response only confirms enqueueing. Verify actual
-DeviceStatus persistence separately after its worker processes the queue.
+DeviceStatus, bulk passenger access and both attendance services, whose successful responses only confirm
+enqueueing. Verify actual persistence separately after their workers process the queues.
 Merged error responses are checked route by route: incomplete/unknown saves abort;
 confirmed saves with downstream failures fail the success threshold without retries.
 
@@ -464,3 +467,82 @@ without querying a database. Real runs always use automatic database preparation
 ```bash
 python3 run-and-install/load-test/test-prepare.py
 ```
+
+
+### Attendance
+
+The web runner's **Service → Attendance** section contains device attendance events
+and user attendance access. Both also run in `allServices` (16 endpoints).
+
+```sh
+SERVICE=saveDeviceTrafficAttendance VUS=1 JOURNEYS=1 ./run-and-install/load-test/start.sh
+SERVICE=saveTrafficAttendance VUS=1 JOURNEYS=1 ./run-and-install/load-test/start.sh
+```
+
+Preparation selects an active user within each device driver's business and reads
+existing activity/place IDs, preferring user assignments and business references,
+then falling back to existing reference rows in the test database. An
+`activities_users` assignment is not required by these services. User attendance
+also requires an access method from `user_access_data` and traffic type **1 (IN)**;
+device attendance requires type **21 (activity end)**, without an access method or
+participant assignment. Missing required reference rows stop the run before API
+requests. No reference data or relationships are created.
+The device event uses the driver's user ID; individual access uses the selected
+attendance user's ID and access method. Payloads use fresh run trace IDs, activity
+end type 21, and user IN type 1. Attendance requests go to `/api/Device/` at the API
+root, including when API_BASE_URL ends in `/school_bus_cloud`.
+
+`queue_accepted` measures HTTP 200/application code 0 for these endpoints;
+`database_saved` excludes them. Queue success does not prove insertion. Check worker
+errors and query the run's trace prefix after processing:
+
+```sql
+SELECT * FROM device_traffic_attendance WHERE trace_id LIKE 'load-YOUR_RUN_ID-%';
+SELECT * FROM traffic_attendance WHERE trace_id LIKE 'load-YOUR_RUN_ID-%';
+```
+
+Individual attendance timestamps use server processing time; device attendance
+uses the simulated time. Repeated valid events insert separate rows. Restart the
+web runner after updating so its service catalog is reloaded, then refresh the page.
+
+
+### Bulk passenger access
+
+Select **Service → Passenger access → Bulk passenger access** in the web runner,
+or run:
+
+```sh
+SERVICE=bulkUserAccess VUS=1 JOURNEYS=1 ./run-and-install/load-test/start.sh
+```
+
+Each repetition sends one HTTP request to `/api/DeviceAccess/bulkUserAccess`, with
+an array under `ReaxiumParameters.BulkUserAccess`. A batch contains up to 10 distinct
+eligible passengers for that device's route. Each passenger retains their matching
+access method; types use IN (1). Small pools send their available passengers,
+including a one-passenger batch when only one is available. Repetitions rotate
+through the pool, reuse identities with new run/iteration traces, and do not invent
+user IDs. Preparation refreshes and validates passenger references before k6 starts.
+Simulated New York wall time is converted to Unix milliseconds for `accessDate`;
+ambiguous/nonexistent DST times are rejected before requests.
+
+HTTP request counts measure batches, not passenger rows. The run also requires
+all requested repetitions to complete; hitting the maximum duration with dropped
+iterations now fails the completion threshold instead of reporting a pass. `queue_accepted` measures
+HTTP 200/application code 0; these responses are never counted as `database_saved`.
+The endpoint is also included in `allServices` (16 endpoints). API bases ending in
+`/school_bus_cloud` are normalized to the API root for this queued service.
+
+After workers drain, verify the run separately against the configured test database:
+
+```sql
+SELECT trace_id, COUNT(*) AS passenger_events
+FROM traffic
+WHERE trace_id LIKE 'load-YOUR_RUN_ID-%'
+GROUP BY trace_id;
+SELECT id, topic, status, device_id FROM messages
+WHERE topic = 'DEVICE_ACCESS' ORDER BY id DESC LIMIT 10;
+```
+
+Queue acceptance cannot establish that every member was stored; inspect worker
+errors and saved rows for skipped users, duplicates, or integrity failures.
+Restart the web runner and refresh the page after updating the service catalog.

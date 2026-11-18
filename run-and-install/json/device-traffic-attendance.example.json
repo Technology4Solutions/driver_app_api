@@ -1,0 +1,13 @@
+{
+  "ReaxiumParameters": {
+    "Device": {
+      "device_id": "42",
+      "activity_id": 4,
+      "place_id": 5,
+      "traffic_type_id": 21,
+      "traffic_attendance_date": "2026-11-15 10:20:30",
+      "trace_id": "attendance-session-test-001",
+      "user_id": 6
+    }
+  }
+}

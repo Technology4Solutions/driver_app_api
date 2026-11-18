@@ -27,10 +27,11 @@ const passengerAssignments = allocatePassengers(devices.slice(0, vus), steps, it
 const savedRate = new Rate('database_saved');
 const queueRate = new Rate('queue_accepted');
 const successRate = new Rate('application_success');
-const completed = new Counter(service === 'journey' ? 'journeys_completed' : 'service_iterations_completed');
-const thresholds = {http_req_failed: ['rate==0'], application_success: ['rate==1']};
-if (steps.some(s => s !== 'deviceStatus')) thresholds.database_saved = ['rate==1'];
-if (steps.includes('deviceStatus')) thresholds.queue_accepted = ['rate==1'];
+const completedName = service === 'journey' ? 'journeys_completed' : 'service_iterations_completed';
+const completed = new Counter(completedName);
+const thresholds = {http_req_failed: ['rate==0'], application_success: ['rate==1'], [completedName]: [`count==${vus * iterations}`]};
+if (steps.some(s => !catalog[s].queued)) thresholds.database_saved = ['rate==1'];
+if (steps.some(s => catalog[s].queued)) thresholds.queue_accepted = ['rate==1'];
 for (const action of steps) thresholds[`application_success{endpoint:${action}}`] = ['rate==1'];
 export const options = {
   scenarios: {services: {executor: 'per-vu-iterations', vus, iterations, maxDuration: __ENV.MAX_DURATION || '30m'}}, thresholds,
@@ -38,8 +39,8 @@ export const options = {
 const headers = {'Content-Type': 'application/json', Authorization: `Basic ${encoding.b64encode(`${__ENV.REAXIUM_API_USER}:${__ENV.REAXIUM_API_PASSWORD}`)}`};
 function post(action, data, d) {
   const descriptor = catalog[action];
-  const isStatus = action === 'deviceStatus';
-  const requestBase = isStatus ? base.replace(/\/school_bus_cloud$/, '') : base;
+  const queued = descriptor.queued === true;
+  const requestBase = queued ? base.replace(/\/school_bus_cloud$/, '') : base;
   const res = http.post(`${requestBase}${descriptor.path}`, JSON.stringify({ReaxiumParameters: {[descriptor.namespace]: data}}), {
     headers, timeout: '30s', redirects: 0, tags: {name: action, endpoint: action},
   });
@@ -47,15 +48,15 @@ function post(action, data, d) {
   try { envelope = res.json().ReaxiumResponse; } catch (_) { envelope = null; }
   const success = res.status === 200 && envelope?.code === 0;
   const saved = res.status === 200 && databaseSaved(envelope, mergedIds(d).length);
-  if (isStatus) queueRate.add(success, {endpoint: action});
+  if (queued) queueRate.add(success, {endpoint: action});
   else savedRate.add(saved, {endpoint: action});
   successRate.add(success, {endpoint: action});
   check(res, {[`${action}: application code is 0`]: () => success}, {endpoint: action});
-  if (!(isStatus ? success : saved)) exec.test.abort(`${action}: save/queue failed or outcome unknown; stopping without retries (trace ${data.trace_id})`);
+  if (!(queued ? success : saved)) exec.test.abort(`${action}: save/queue failed or outcome unknown; stopping without retries (trace ${Array.isArray(data) ? data[0]?.trace_id : data.trace_id})`);
 }
 export default function () {
   const iteration = exec.vu.iterationInScenario;
-  const d = {...devices[exec.vu.idInTest - 1], ...passengerAssignments[exec.vu.idInTest - 1][iteration]};
+  const d = {...devices[exec.vu.idInTest - 1], ...passengerAssignments[exec.vu.idInTest - 1][iteration], bulk_iteration: iteration};
   const start = dateBase + iteration * Math.max(120000, steps.length * 60000);
   const trace = `load-${__ENV.RUN_ID}-${exec.vu.idInTest}-${iteration}`;
   // Build the complete trip before writing, including date validation.

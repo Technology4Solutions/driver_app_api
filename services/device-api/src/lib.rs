@@ -1,8 +1,11 @@
 pub mod database;
+pub mod device_access;
+pub mod device_attendance;
 pub mod device_status;
 pub mod device_traffic;
 mod json_body;
 pub mod telemetry;
+pub mod traffic_attendance;
 pub mod user_access;
 
 use axum::{middleware, routing::get, Router};
@@ -11,6 +14,16 @@ use tower_http::trace::TraceLayer;
 
 pub fn router(metrics: Metrics) -> Router {
     Router::new()
+        .route("/api/DeviceAccess/bulkUserAccess", axum::routing::post(device_access::bulk_user_access))
+        .route("/device/DeviceAccess/bulkUserAccess", axum::routing::post(device_access::bulk_user_access))
+        .route(
+            "/api/Device/saveTrafficAttendance",
+            axum::routing::post(traffic_attendance::save),
+        )
+        .route(
+            "/api/Device/saveDeviceTrafficAttendance",
+            axum::routing::post(device_attendance::save),
+        )
         .route(
             "/UserAccess/executeAnAccessOfAUserInABus",
             axum::routing::post(user_access::execute_access),

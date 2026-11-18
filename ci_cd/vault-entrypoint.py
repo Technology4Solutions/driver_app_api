@@ -34,7 +34,7 @@ def kv_version(addr, mount, token, configured='auto'):
 def configuration(environ, bundle, mode):
     result = dict(environ)
     # Export only application configuration, never arbitrary executable/shell settings.
-    allowed = ('DB_', 'REAXIUM_API_', 'DEVICE_STATUS_', 'VISION_')
+    allowed = ('DB_', 'REAXIUM_API_', 'DEVICE_STATUS_', 'DEVICE_ACCESS_', 'DEVICE_ATTENDANCE_', 'TRAFFIC_ATTENDANCE_', 'VISION_')
     exact = {'BROADCAST_ENABLED', 'DASHBOARD_BROADCAST_ENABLED', 'DEVICES_API_EXPORT_DEVICE_STATUS_URL',
              'RABBITMQ_URL', 'REDIS_URL', 'LOG_LEVEL'}
     for key, value in bundle.items():

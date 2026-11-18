@@ -793,7 +793,7 @@ database tests because fixtures rebuild the same tables.
 
 ## k6 load tests
 
-The CLI and DEV web runner cover all 13 business services individually, plus
+The CLI and DEV web runner cover all 16 business services individually, plus
 route journeys and an all-services scenario. See
 [load-test instructions](run-and-install/load-test/README.md#coverage-for-every-business-service)
 for dataset requirements, commands, and verification.
@@ -829,3 +829,200 @@ The new Loki and Alloy data volumes survive monitoring restarts/removal. Back up
 Loki's volume if historical logs must survive losing the monitoring node. This
 single-instance Loki setup follows the existing single-node monitoring storage
 model; it is not a highly available logging cluster.
+
+## Device attendance session events
+
+`POST /api/Device/saveDeviceTrafficAttendance` uses the shared Basic credentials
+and accepts `ReaxiumParameters.Device`, matching the Java service. Example:
+
+```json
+{"ReaxiumParameters":{"Device":{"device_id":"42","activity_id":4,"place_id":5,"traffic_type_id":21,"traffic_attendance_date":"2026-11-15 10:20:30","trace_id":"session-1","user_id":6}}}
+```
+
+Only the envelope, Device object and non-null device ID are required. Empty device
+IDs remain accepted, and other fields may be omitted/null, as in Java; database
+constraints can still reject them during background processing. Numeric IDs accept
+numeric strings. The event type and device timestamp are preserved without session
+transition checks. Each event inserts a new `device_traffic_attendance` row; there
+is no deduplication, user attendance insert, or broadcast.
+
+HTTP 200/code 0 with `Device Attendance record queued` means RabbitMQ confirmed
+publication, before persistence. Invalid payloads and publication failures return
+HTTP 400/code 500 with `Error reporting Device attendance record`. Authentication
+uses the existing Rust HTTP 200/code 3 convention. JSON and legacy duplicate JSON
+content types are supported; URL-encoded forms are not parsed.
+
+The worker uses durable topic exchange `attendanceAPIExchange`, durable queue
+`attendanceAPIQueue`, routing key `reaxium.devices.attendance.api.#`, one consumer
+per process, and prefetch 1. Override with `DEVICE_ATTENDANCE_EXCHANGE`,
+`DEVICE_ATTENDANCE_QUEUE`, and `DEVICE_ATTENDANCE_ROUTING_KEY`; connection uses
+`RABBITMQ_URL`. These environment variables are optional. Startup requires this
+queue connection. Sharing the Java queue creates competing consumers.
+
+The worker acknowledges successful inserts and logs/rejects failed events without
+requeue. It reconnects after broker outages and drains on shutdown within 15 seconds.
+Publisher confirmations and explicit rejection follow the existing Rust status
+worker conventions. The table must already exist; no schema migration is applied.
+
+`cargo test --workspace` checks payload compatibility, authentication and error
+responses without dependencies. The optional integration test verifies HTTP queue
+acceptance, all stored fields, and duplicate insertion using disposable MySQL and
+RabbitMQ (database name must be `device_api_migration_test`):
+
+```sh
+TEST_DATABASE_URL='mysql://TEST_USER:TEST_PASSWORD@127.0.0.1:3306/device_api_migration_test' \
+TEST_RABBITMQ_URL='amqp://guest:guest@127.0.0.1:5672/%2f' \
+  cargo test -p device-api --test device_attendance -- --ignored --test-threads=1
+```
+
+## Individual attendance access
+
+`POST /api/Device/saveTrafficAttendance` records a user's attendance access through
+RabbitMQ, matching the Java service. It uses the shared Basic credentials and JSON
+(including legacy duplicate JSON content types). Example payload:
+
+```json
+{"ReaxiumParameters":{"UserAccess":{"user_id":6,"device_id":"42","traffic_type":1001,"access_type":1,"traffic_info":"Check in","trace_id":"attendance-access-test-001","activity_id":4,"place_id":5}}}
+```
+
+Only the envelope, UserAccess object and non-null `user_id` are required by the
+handler. Numeric IDs accept numeric strings. Missing other fields may fail database
+constraints later. Each message inserts `traffic_attendance`: `traffic_type` maps to
+`traffic_type_id` and `access_type` directly to `access_id`, with no credential lookup.
+Device, user, activity, place, trace and traffic info are copied. The worker sets
+`datetime` to server local processing time (configure the runtime timezone to match
+Java if needed) and `session_uid` to 0. Client timestamps/session IDs are ignored.
+There are no session transitions, duplicate checks, broadcasts or notifications.
+
+HTTP 200/code 0, `traffic Attendance record queued`, confirms publication before
+persistence. Validation/publication failures use HTTP 400/code 500,
+`Error reporting Traffic attendance record`. Authentication retains HTTP 200/code 3.
+The durable queue is `trafficAttendanceAPIQueue`, exchange
+`trafficAttendanceAPIExchange`, routing key `reaxium.devices.traffic.attendance.api.#`.
+Override via `TRAFFIC_ATTENDANCE_QUEUE`, `TRAFFIC_ATTENDANCE_EXCHANGE`, and
+`TRAFFIC_ATTENDANCE_ROUTING_KEY`; connection uses `RABBITMQ_URL`. Compose and Vault
+support these settings. Sharing the Java queue creates competing consumers.
+
+One worker per process consumes with prefetch 1, acknowledges inserts, rejects/logs
+failures without requeue, reconnects after outages, and drains on shutdown within
+15 seconds. Startup requires RabbitMQ; the table must already exist. Successful
+inserts log the saved ID, user ID and trace ID. Verify the submitted trace in the
+API's configured database:
+
+```sql
+SELECT * FROM traffic_attendance
+WHERE trace_id = 'attendance-access-test-001'
+ORDER BY traffic_attendance_id DESC;
+```
+
+Regular tests require no dependencies. The optional end-to-end test checks queueing,
+field mappings and duplicate insertion against disposable MySQL/RabbitMQ:
+
+```sh
+TEST_DATABASE_URL='mysql://TEST_USER:TEST_PASSWORD@127.0.0.1:3306/device_api_migration_test' \
+TEST_RABBITMQ_URL='amqp://guest:guest@127.0.0.1:5672/%2f' \
+  cargo test -p device-api --test traffic_attendance -- --ignored --test-threads=1
+```
+
+After rebuilding/restarting, test with valid IDs and a unique trace ID:
+
+```sh
+curl -i --user "$REAXIUM_API_USER:$REAXIUM_API_PASSWORD" \
+  -H 'Content-Type: application/json' \
+  --data-binary @run-and-install/json/traffic-attendance.example.json \
+  'http://localhost:8080/api/Device/saveTrafficAttendance'
+```
+
+## Bulk passenger access
+
+`POST /api/DeviceAccess/bulkUserAccess` and its device-client alias
+`/device/DeviceAccess/bulkUserAccess` accept `ReaxiumParameters.BulkUserAccess`
+using the existing shared Basic credentials. See
+`run-and-install/json/bulk-user-access.example.json`. Replace the fixture IDs and
+`accessDate` (Unix milliseconds) with valid test values before sending:
+
+```sh
+curl -i --user "$REAXIUM_API_USER:$REAXIUM_API_PASSWORD" \
+  -H 'Content-Type: application/json' \
+  --data-binary @run-and-install/json/bulk-user-access.example.json \
+  http://localhost:8080/api/DeviceAccess/bulkUserAccess
+```
+
+The envelope must contain a nonempty array. As in Java, individual missing/null
+fields are accepted at the HTTP boundary; incompatible field types are rejected.
+Numeric strings are accepted. The server sets the internal `abulk` flag and does
+not trust a client-supplied flag. Success is HTTP 200/code 0, `Device Access queued`;
+validation/publishing failures are HTTP 400/code 500, `Error reporting device access`.
+Authentication retains Rust's HTTP 200/code 3 convention. JSON and duplicate legacy
+JSON content types are supported; URL-encoded forms are not parsed.
+
+The durable topic exchange `devicesAccessAPIExchange`, queue `devicesAccessAPIQueue`,
+and routing key `reaxium.devices.access.api.#` match Java. Override them using
+`DEVICE_ACCESS_EXCHANGE`, `DEVICE_ACCESS_QUEUE`, and `DEVICE_ACCESS_ROUTING_KEY`;
+connections use `RABBITMQ_URL` and `REDIS_URL`. Compose and Vault support these
+settings. Startup requires the queue connection. One Rust consumer per process
+uses manual acknowledgements and prefetch 5 (Java scales from one to two consumers).
+Publishing uses persistent messages with confirmed routing; broker outages fail
+HTTP publication. The connection recovers and shutdown drains within 15 seconds.
+The worker also understands Java single-access messages sharing the same queue.
+Sharing the queue with Java creates competing consumers; use separate topology for
+isolated tests.
+
+For each record, credential lookup matches user ID and access method without a
+status filter; the first matching `user_access_data_id` becomes `traffic.access_id`.
+Route assignment uses the latest related bus number; submitted `bus_info` remains
+separate. Redis reads Java's credential objects and route/bus keys. Route/bus and
+negative credential values use Java's shared keys and four-hour TTL. Positive
+credential IDs have a separate `rust:device:user_creds_id:<user>:<method>` key with
+the same TTL, avoiding incomplete or secret-bearing objects in the Java cache.
+Redis failures fall back to database lookup. Missing credentials and invalid dates
+skip that record. If nothing can be saved, the message enters retry handling.
+
+The worker inserts passenger `traffic` in one transaction, preserving supplied
+types/situations, trace, route, stops and location. `accessDate` is converted to
+America/New_York and truncated to whole seconds. Snapshot stop identity prefers
+a positive distance stop, otherwise the explicit stop. Current server local time
+sets `last_update` when supported. Existing unique keys remain authoritative; SQL
+errors roll back the batch, matching Spring's rollback-only behavior after a
+repository persistence error. This is not an attendance-table insert or a boarding
+authorization decision.
+
+After commit, enriched traffic with Java's constant `ACCESS_TRAFFIC` label is sent
+to the HTTP WebSocket dispatcher. It uses `BROADCAST_ENABLED`, `APP_ENV`,
+`DEVICES_API_EXPORT_DEVICE_STATUS_URL` and the shared API credentials, following
+the status worker's configuration. Missing enrichment or HTTP failures are logged
+without retrying committed traffic. No Crisis/Vision call or direct parent
+notification is added. HTTP queue acceptance is not a database or broadcast result.
+
+Constraint/duplicate failures are rejected without retry. Other failures republish
+persistent messages with `x-retry-count` up to three retries. Exhausted messages
+are saved in `messages` with topic `DEVICE_ACCESS`, status `ERROR`, the source
+payload, device ID, and error text before acknowledgement. Audit names use
+`Reaxium Admin`, as in Java's background worker. Rust stores error text rather than
+a JVM stack trace. If retry publication or error-record insertion fails, Rust
+preserves the original message rather than silently discarding it. Existing
+`traffic` and `messages` tables must be installed; no migration is applied.
+
+Regular tests verify envelopes, aliases, authentication and Java-compatible scalar
+conversion. An ignored integration test verifies queueing, missing-credential
+skipping, field mappings, date truncation, whole-batch duplicate rollback, and
+retry exhaustion/error persistence, cache TTL, and post-commit delivery failure
+against disposable services with a local mock WebSocket gateway:
+
+```sh
+BROADCAST_ENABLED=false \
+TEST_DATABASE_URL='mysql://TEST_USER:TEST_PASSWORD@127.0.0.1:3306/device_api_migration_test' \
+TEST_RABBITMQ_URL='amqp://guest:guest@127.0.0.1:5672/%2f' \
+TEST_REDIS_URL='redis://127.0.0.1:6379/15' \
+  cargo test -p device-api --test device_access -- --ignored --test-threads=1
+```
+
+Use a disposable Redis database and MySQL database named
+`device_api_migration_test`; fixtures rebuild traffic-related tables. Run database
+tests serially. Verify actual saved events using your unique trace ID:
+
+```sql
+SELECT * FROM traffic WHERE trace_id = 'bulk-access-test-001';
+SELECT id, title, topic, status, device_id FROM messages
+WHERE topic = 'DEVICE_ACCESS' ORDER BY id DESC LIMIT 10;
+```

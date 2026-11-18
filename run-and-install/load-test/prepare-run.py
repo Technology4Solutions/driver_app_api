@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parent
 ACCESS = 'executeAnAccessOfAUserInABus'
+BULK = 'bulkUserAccess'
 
 
 def positive(value):
@@ -23,6 +24,16 @@ def positive(value):
 
 
 def validate(device, steps):
+    if any(step in ('saveDeviceTrafficAttendance', 'saveTrafficAttendance') for step in steps):
+        for key in ('attendance_activity_id', 'attendance_place_id'):
+            if not positive(device.get(key)):
+                raise ValueError('Attendance requires valid ' + key + '; the test database needs an existing activity/place reference')
+        if 'saveDeviceTrafficAttendance' in steps and not positive(device.get('attendance_device_type')):
+            raise ValueError('Device attendance requires traffic_type reference 21 (ACTIVITY_END)')
+        if 'saveTrafficAttendance' in steps and not positive(device.get('attendance_user_id')):
+            raise ValueError('User attendance requires an active user in the device business')
+        if 'saveTrafficAttendance' in steps and (not positive(device.get('attendance_access_type')) or device.get('attendance_traffic_type') not in (1, 2)):
+            raise ValueError('Attendance requires valid access type and traffic type 1 (IN) or 2 (OUT)')
     for key in ('device_id', 'route_id', 'driver_id', 'bus_info', 'start_stop_id', 'end_stop_id'):
         if not positive(device.get(key)):
             raise ValueError('%s must be a positive ID' % key)
@@ -62,7 +73,7 @@ def select(rows, steps, vus, iterations, start):
             if device_id in seen:
                 raise ValueError('Duplicate device ID')
             seen.add(device_id)
-            if ACCESS in steps:
+            if ACCESS in steps or BULK in steps:
                 if d.get('passenger_date') and d['passenger_date'] != start[:10]:
                     raise ValueError('Passenger date does not match simulated date')
                 if allocate([d], 1) is None:
@@ -72,7 +83,7 @@ def select(rows, steps, vus, iterations, start):
             rejected.append('Device %s: %s' % (d.get('device_id', '?'), error))
     if len(candidates) < vus:
         raise ValueError('Data preparation failed: need %d eligible devices, found %d. %s' % (vus, len(candidates), '; '.join(rejected)))
-    if ACCESS not in steps:
+    if ACCESS not in steps and BULK not in steps:
         return candidates[:vus]
     # Keep the actual passenger pools compact; k6 cycles them for each repetition.
     return [dict(d, **allocate([d], 1)[0][0]) for d in candidates[:vus]]
@@ -80,16 +91,17 @@ def select(rows, steps, vus, iterations, start):
 
 def validate_dates(steps, iterations, start):
     stamp = datetime.strptime(start, '%Y-%m-%dT%H:%M:%SZ')
-    if ACCESS not in steps:
+    if ACCESS not in steps and BULK not in steps:
         stamp + timedelta(milliseconds=(iterations - 1) * max(120000, len(steps) * 60000) + (len(steps) - 1) * 60000)
         return
     zone = ZoneInfo('America/New_York')
     for iteration in range(iterations):
-        event = stamp + timedelta(milliseconds=iteration * max(120000, len(steps) * 60000) + steps.index(ACCESS) * 60000)
-        if event.year < 2007:
-            raise ValueError('Passenger run must use year 2007 or later')
-        if event.replace(tzinfo=zone, fold=0).utcoffset() != event.replace(tzinfo=zone, fold=1).utcoffset():
-            raise ValueError('Passenger time is ambiguous or nonexistent in America/New_York')
+        for action in (step for step in steps if step in (ACCESS, BULK)):
+            event = stamp + timedelta(milliseconds=iteration * max(120000, len(steps) * 60000) + steps.index(action) * 60000)
+            if event.year < 2007:
+                raise ValueError('Passenger run must use year 2007 or later')
+            if event.replace(tzinfo=zone, fold=0).utcoffset() != event.replace(tzinfo=zone, fold=1).utcoffset():
+                raise ValueError('Passenger time is ambiguous or nonexistent in America/New_York')
 
 
 def main():
@@ -121,6 +133,8 @@ def main():
             exported = Path(directory, 'devices.json')
             command = [sys.executable, str(ROOT / 'export-devices.py'), '--env-file', str(args.env_file),
                        '--passenger-date', args.start[:10], '--output', str(exported)]
+            if any(step in ('saveDeviceTrafficAttendance', 'saveTrafficAttendance') for step in steps):
+                command.append('--attendance')
             if args.config_file:
                 command.extend(['--config-file', str(args.config_file)])
             subprocess.run(command, check=True, timeout=180)
@@ -134,7 +148,7 @@ def main():
     with os.fdopen(fd, 'w') as stream:
         json.dump(selected, stream)
     print('Data ready: devices %s%s. Database unchanged.' % (', '.join(str(d['device_id']) for d in selected),
-          '; passengers reused across repetitions' if ACCESS in steps else ''), flush=True)
+          '; passengers reused across repetitions' if ACCESS in steps or BULK in steps else ''), flush=True)
     print('Step 2/2: ready for k6 execution.', flush=True)
 
 

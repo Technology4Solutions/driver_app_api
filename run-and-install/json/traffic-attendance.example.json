@@ -1,0 +1,14 @@
+{
+  "ReaxiumParameters": {
+    "UserAccess": {
+      "user_id": 6,
+      "device_id": "42",
+      "traffic_type": 1,
+      "access_type": 1,
+      "traffic_info": "Check in",
+      "trace_id": "attendance-access-test-001",
+      "activity_id": 4,
+      "place_id": 5
+    }
+  }
+}

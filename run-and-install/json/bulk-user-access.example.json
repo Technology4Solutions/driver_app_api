@@ -1,0 +1,22 @@
+{
+  "ReaxiumParameters": {
+    "BulkUserAccess": [
+      {
+        "user_id": 6,
+        "device_id": 42,
+        "traffic_type": 1,
+        "access_type": 3,
+        "traffic_info": "Passenger boarding",
+        "trace_id": "bulk-access-test-001",
+        "accessDate": "1792584000000",
+        "route_id": 7,
+        "stop_id": 9,
+        "stop_id_by_distance": 10,
+        "bus_info": "2",
+        "latitude": 27.1975,
+        "longitude": -80.2528,
+        "access_situation_id": 1
+      }
+    ]
+  }
+}

@@ -21,6 +21,14 @@ export function mergedIds(device) {
 }
 function positive(value) { return Number.isInteger(Number(value)) && Number(value) > 0; }
 export function validateDevice(device, steps) {
+  if (steps.some(s => s === 'saveDeviceTrafficAttendance' || s === 'saveTrafficAttendance')) {
+    for (const key of ['attendance_activity_id', 'attendance_place_id']) {
+      if (!positive(device[key])) throw new Error(`Attendance requires valid ${key}; prepare activity/place references in the test database`);
+    }
+    if (steps.includes('saveDeviceTrafficAttendance') && !positive(device.attendance_device_type)) throw new Error('Device attendance requires traffic_type reference 21 (ACTIVITY_END)');
+    if (steps.includes('saveTrafficAttendance') && !positive(device.attendance_user_id)) throw new Error('User attendance requires an active user in the device business');
+    if (steps.includes('saveTrafficAttendance') && (!positive(device.attendance_access_type) || ![1, 2].includes(Number(device.attendance_traffic_type)))) throw new Error('Attendance requires a valid access type and traffic type 1 (IN) or 2 (OUT)');
+  }
   for (const key of ['device_id', 'route_id', 'driver_id', 'bus_info', 'start_stop_id', 'end_stop_id']) {
     if (!positive(device[key])) throw new Error(`Dataset device ${device.device_id}: ${key} must be a positive ID`);
   }
@@ -32,9 +40,16 @@ export function validateDevice(device, steps) {
     const ids = mergedIds(device);
     if (ids.length < 2 || !ids.every(positive) || new Set(ids).size !== ids.length) throw new Error(`Dataset device ${device.device_id} needs route_ids with at least two distinct valid routes. Re-export using export-devices.py; older datasets only contain route_id. Select devices with two related routes before running a merged test.`);
   }
-  if (steps.includes('executeAnAccessOfAUserInABus') && !device.passengers?.length && (!positive(device.passenger_id) || !positive(device.access_type))) throw new Error('Passenger service requires passenger_id and access_type matching user_access_data');
+  if (steps.some(s => ['executeAnAccessOfAUserInABus', 'bulkUserAccess'].includes(s)) && !device.passengers?.length && (!positive(device.passenger_id) || !positive(device.access_type))) throw new Error('Passenger service requires passenger_id and access_type matching user_access_data');
 }
 export function payload(action, d, start, trace) {
+  if (action === 'saveDeviceTrafficAttendance' || action === 'saveTrafficAttendance') {
+    const attendance = {device_id: String(d.device_id), user_id: Number(action === 'saveDeviceTrafficAttendance' ? d.driver_id : d.attendance_user_id),
+      activity_id: Number(d.attendance_activity_id), place_id: Number(d.attendance_place_id), trace_id: trace};
+    return action === 'saveDeviceTrafficAttendance'
+      ? {...attendance, traffic_type_id: Number(d.attendance_device_type), traffic_attendance_date: date(start)}
+      : {...attendance, traffic_type: Number(d.attendance_traffic_type), access_type: Number(d.attendance_access_type), traffic_info: 'k6 attendance access'};
+  }
   const finishing = /^(end|interrupt)/.test(action);
   const common = {device_id: Number(d.device_id), route_id: Number(d.route_id), driver_id: Number(d.driver_id),
     bus_info: String(d.bus_info), trace_id: trace, stop_id: Number(finishing ? d.end_stop_id : d.start_stop_id),
@@ -44,6 +59,18 @@ export function payload(action, d, start, trace) {
     device_status: {temperature: 30, battery_power_level: 85, is_charging: 0, installed_app_version: '1.0.0', bus_info: String(d.bus_info)},
     device_location: {latitude: common.latitude, longitude: common.longitude, speed: 0, bearing: 0, accuracy: 10, lag_time: 0},
   };
+  if (action === 'bulkUserAccess') {
+    const pool = d.passengers || [{passenger_id: d.passenger_id, access_type: d.access_type}];
+    const distinct = [...new Map(pool.map(p => [Number(p.passenger_id), p])).values()];
+    if (!distinct.length || distinct.some(p => !positive(p.passenger_id) || !positive(p.access_type))) throw new Error('Bulk access needs valid passengers and access methods');
+    const offset = (Number(d.bulk_iteration || 0) * 10) % distinct.length;
+    return Array.from({length: Math.min(10, distinct.length)}, (_, index) => {
+      const passenger = distinct[(offset + index) % distinct.length];
+      const {driver_id, ...access} = common;
+      return {...access, user_id: Number(passenger.passenger_id), access_type: Number(passenger.access_type), traffic_type: 1,
+        traffic_info: 'k6 bulk passenger boarding', accessDate: accessTimestamp(start), stop_id_by_distance: common.stop_id, access_situation_id: 1};
+    });
+  }
   if (action === 'executeAnAccessOfAUserInABus') {
     const {driver_id, ...access} = common;
     return {...access, user_id: Number(d.passenger_id), access_type: Number(d.access_type), traffic_type: 1,
@@ -67,7 +94,7 @@ export function databaseSaved(envelope, expectedRoutes) {
 
 // Validate pools before requests, then cycle passengers for independent events.
 export function allocatePassengers(devices, steps, iterations, startDate) {
-  if (!steps.includes('executeAnAccessOfAUserInABus')) return devices.map(() => []);
+  if (!steps.some(s => ['executeAnAccessOfAUserInABus', 'bulkUserAccess'].includes(s))) return devices.map(() => []);
   return devices.map(d => {
     if (d.passenger_date && d.passenger_date !== startDate.slice(0, 10)) throw new Error(`Device ${d.device_id}: re-export passengers for the simulated start date`);
     const pool = d.passengers || [{passenger_id: d.passenger_id, access_type: d.access_type}];

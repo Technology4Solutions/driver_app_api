@@ -35,8 +35,10 @@ function estimate() {
   if (selected) {
     details.push(selected.steps ? steps.map(step => services[step].path).join(' → ') : selected.path);
     if (steps.some(step => step.includes('Merge'))) details.push('Dataset needs at least two related routes per device.');
-    if (steps.includes('executeAnAccessOfAUserInABus')) details.push('Repetitions cycle through valid route passengers (users.user_type_id = 2) with matching access methods. Data is refreshed and checked automatically before k6 starts.');
-    if (steps.includes('deviceStatus')) details.push('DeviceStatus success confirms queue acceptance; persistence happens asynchronously.');
+    if (steps.some(step => ['executeAnAccessOfAUserInABus', 'bulkUserAccess'].includes(step))) details.push('Repetitions cycle through valid route passengers (users.user_type_id = 2) with matching access methods. Data is refreshed and checked automatically before k6 starts.');
+    if (steps.includes('bulkUserAccess')) details.push('Each bulk request contains up to 10 distinct passengers with matching access methods. Repetitions rotate through the passenger pool.');
+    if (steps.some(step => services[step]?.queued)) details.push('Queued service success confirms RabbitMQ acceptance only. Check worker logs and database rows by the load run trace ID to verify persistence.');
+    if (steps.some(step => services[step]?.category === 'Attendance')) details.push('Attendance uses existing reference IDs, preferring user/business assignments when available. User access uses IN (1); timestamps for user attendance use server processing time.');
   }
   $('service-details').textContent = details.join(' ');
 }
@@ -48,7 +50,8 @@ function populateServices(catalog) {
     ['Device status', ['deviceStatus']],
     ['Route traffic', Object.keys(catalog).filter(name => catalog[name].namespace === 'DeviceTraffic')],
     ['Alarm notifications', Object.keys(catalog).filter(name => catalog[name].namespace === 'Notification')],
-    ['Passenger access', Object.keys(catalog).filter(name => catalog[name].namespace === 'UserAccess' || name === 'beginRouteAccess')],
+    ['Attendance', Object.keys(catalog).filter(name => catalog[name].category === 'Attendance')],
+    ['Passenger access', Object.keys(catalog).filter(name => (catalog[name].category === 'Passenger access') || (catalog[name].namespace === 'UserAccess' && catalog[name].category !== 'Attendance') || name === 'beginRouteAccess')],
   ]) {
     const group = document.createElement('optgroup');
     group.label = label;

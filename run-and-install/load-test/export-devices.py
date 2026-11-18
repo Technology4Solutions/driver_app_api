@@ -100,6 +100,7 @@ def main():
     parser.add_argument('--config-file', type=Path, help='Private Jenkins/Vault JSON; replaces .env settings')
     parser.add_argument('--passenger-date', type=date.fromisoformat, default=datetime.now(ZoneInfo('Africa/Casablanca')).date(),
                         help='Simulated start date recorded in the exported passenger snapshot')
+    parser.add_argument('--attendance', action='store_true', help='Include validated attendance relationships for each business')
     parser.add_argument('--limit', type=int, default=1000)
     parser.add_argument('--output', type=Path, default=ROOT / 'run-and-install/devices.local.json')
     args = parser.parse_args()
@@ -122,6 +123,12 @@ def main():
         row['passenger_date'] = args.passenger_date.isoformat()
         row['passenger_id'] = row['passengers'][0]['passenger_id'] if row['passengers'] else None
         row['access_type'] = row['passengers'][0]['access_type'] if row['passengers'] else None
+    if args.attendance:
+        sql = Path(__file__).with_name('export-attendance.sql').read_text()
+        contexts = {str(context['business_id']): context for context in
+                    (json.loads(line) for line in query(config, sql).splitlines() if line)}
+        for row in rows:
+            row.update(contexts.get(str(row['business_id']), {}))
     rows.sort(key=lambda row: not row['passengers'])
     print('Eligible passenger counts per device: ' + ', '.join(str(row['device_id']) + ':' + str(len(row['passengers'])) for row in rows))
     args.output.parent.mkdir(parents=True, exist_ok=True)

@@ -1,6 +1,6 @@
 pub(crate) mod broadcast;
 mod filter;
-mod http_broadcast;
+pub(crate) mod http_broadcast;
 pub(crate) mod model;
 pub mod queue;
 mod repository;

@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 from runtime_config import load_runtime_config
 import json
+import sqlite3
 
 spec = importlib.util.spec_from_file_location('export_devices', Path(__file__).with_name('export-devices.py'))
 exporter = importlib.util.module_from_spec(spec)
@@ -95,6 +96,64 @@ class EnvTests(unittest.TestCase):
         with self.assertRaises(ValueError) as caught:
             self.load("DB_PASSWORD='private-secret")
         self.assertNotIn('private-secret', str(caught.exception))
+
+    def test_attendance_export_matches_business_and_preserves_unmatched_devices(self):
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder, 'devices.json')
+            rows = [dict(device_id=1, business_id=7, route_id=1), dict(device_id=2, business_id=8, route_id=2)]
+            context = dict(business_id=7, attendance_user_id=10, attendance_activity_id=4,
+                           attendance_place_id=5, attendance_access_type=1,
+                           attendance_traffic_type=1, attendance_device_type=21)
+            results = ['\n'.join(map(json.dumps, rows)), '', json.dumps(context)]
+            args = ['export-devices.py', '--attendance', '--output', str(output)]
+            with patch('sys.argv', args), patch.object(exporter, 'read_env', return_value={}), \
+                 patch.object(exporter, 'query', side_effect=results) as query:
+                exporter.main()
+            exported = json.loads(output.read_text())
+            self.assertEqual(exported[0]['attendance_activity_id'], 4)
+            self.assertNotIn('attendance_activity_id', exported[1])
+            self.assertIn('activities_users', query.call_args_list[-1].args[1])
+            self.assertTrue(all('INSERT' not in call.args[1] for call in query.call_args_list))
+
+    def test_attendance_reference_selection_without_assignments_or_access_methods(self):
+        # This SELECT uses portable CTE/window/JSON syntax; execute it against
+        # fixture tables to catch accidental INNER JOIN gates, without a live DB.
+        db = sqlite3.connect(':memory:')
+        self.addCleanup(db.close)
+        db.executescript("""
+            CREATE TABLE users (user_id INT, business_id INT, status_id INT);
+            CREATE TABLE activities_users (user_id INT, activity_id INT, place_id INT);
+            CREATE TABLE activities (activity_id INT);
+            CREATE TABLE places (place_id INT);
+            CREATE TABLE business_activities (business_id INT, activity_id INT);
+            CREATE TABLE business_places (business_id INT, place_id INT);
+            CREATE TABLE user_access_data (user_id INT, access_type_id INT);
+            CREATE TABLE traffic_type (traffic_type_id INT);
+            INSERT INTO users VALUES (6, 7, 1), (9, 7, 1);
+            INSERT INTO activities VALUES (4), (8);
+            INSERT INTO places VALUES (5), (9);
+            INSERT INTO traffic_type VALUES (21);
+        """)
+        sql = Path(__file__).with_name('export-attendance.sql').read_text()
+        context = json.loads(db.execute(sql).fetchone()[0])
+        self.assertEqual(context['attendance_user_id'], 6)
+        self.assertEqual(context['attendance_activity_id'], 4)
+        self.assertEqual(context['attendance_place_id'], 5)
+        self.assertEqual(context['attendance_device_type'], 21)
+        self.assertIsNone(context['attendance_access_type'])
+        self.assertIsNone(context['attendance_traffic_type'])
+        db.executescript("""
+            INSERT INTO user_access_data VALUES (9, 2);
+            INSERT INTO business_activities VALUES (7, 8);
+            INSERT INTO business_places VALUES (7, 9);
+            INSERT INTO traffic_type VALUES (1);
+        """)
+        context = json.loads(db.execute(sql).fetchone()[0])
+        self.assertEqual(context['attendance_user_id'], 9)
+        self.assertEqual(context['attendance_access_type'], 2)
+        self.assertEqual(context['attendance_activity_id'], 8)
+        self.assertEqual(context['attendance_place_id'], 9)
+        self.assertEqual(context['attendance_traffic_type'], 1)
 
     def test_mysql_receives_full_password_outside_command_arguments(self):
         config = self.load('DB_HOST=localhost\nDB_USER=root\nDB_NAME=test\nDB_PASSWORD=abc#def\n')

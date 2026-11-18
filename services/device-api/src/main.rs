@@ -41,6 +41,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         device_api::device_status::queue::Config::from_env()?,
     )
     .await?;
+    let (attendance_publisher, attendance_worker) = device_api::device_attendance::queue::start(
+        database.clone(),
+        device_api::device_attendance::queue::Config::from_env()?,
+    )
+    .await?;
+    let (traffic_attendance_publisher, traffic_attendance_worker) =
+        device_api::traffic_attendance::queue::start(
+            database.clone(),
+            device_api::traffic_attendance::queue::Config::from_env()?,
+        )
+        .await?;
+    let (access_publisher, access_worker) = device_api::device_access::queue::start(
+        database.clone(), device_api::device_access::queue::Config::from_env()?,
+    ).await?;
     let api = tokio::net::TcpListener::bind(bind).await?;
     let admin = tokio::net::TcpListener::bind(admin_bind).await?;
     tracing::info!(%bind, %admin_bind, "service started");
@@ -51,6 +65,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 router(metrics.clone())
                     .layer(axum::Extension(database.clone()))
                     .layer(axum::Extension(status_publisher))
+                    .layer(axum::Extension(access_publisher))
+                    .layer(axum::Extension(attendance_publisher))
+                    .layer(axum::Extension(traffic_attendance_publisher))
                     .layer(axum::Extension(endpoint_config))
                     .layer(axum::Extension(vision_config)),
             )
@@ -63,7 +80,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 .await
         }
     );
-    status_worker.shutdown().await;
+    tokio::join!(
+        status_worker.shutdown(),
+        attendance_worker.shutdown(),
+        traffic_attendance_worker.shutdown(),
+        access_worker.shutdown()
+    );
     result?;
     database.close().await;
     Ok(())

@@ -13,7 +13,7 @@ spec.loader.exec_module(prepare)
 
 
 def device(id, passengers):
-    return dict(device_id=id, route_id=id, driver_id=1, bus_info='1', start_stop_id=1,
+    return dict(attendance_user_id=10, attendance_activity_id=1, attendance_place_id=1, attendance_access_type=3, attendance_device_type=21, attendance_traffic_type=1, device_id=id, route_id=id, driver_id=1, bus_info='1', start_stop_id=1,
                 end_stop_id=2, start_latitude=27, start_longitude=-80, end_latitude=27,
                 end_longitude=-80, device_imei='mock', business_id=1, route_ids='1,2',
                 passenger_date='2026-11-14',
@@ -86,6 +86,40 @@ class PreparationTests(unittest.TestCase):
         self.assertEqual({p['passenger_id'] for pool in assigned for p in pool}, {10})
         with self.assertRaisesRegex(ValueError, 'at least one valid'):
             prepare.select([device(1, [])], [prepare.ACCESS], 1, 100, '2026-11-14')
+
+    def test_attendance_preflight_requires_reference_data(self):
+        for action in ('saveDeviceTrafficAttendance', 'saveTrafficAttendance'):
+            row = device(1, [])
+            del row['attendance_place_id']
+            with self.assertRaisesRegex(ValueError, 'attendance_place_id'):
+                prepare.select([row], [action], 1, 1, '2026-11-14')
+        row = device(1, [])
+        row['attendance_traffic_type'] = 1001
+        with self.assertRaisesRegex(ValueError, 'traffic type'):
+            prepare.select([row], ['saveTrafficAttendance'], 1, 1, '2026-11-14')
+
+    def test_device_attendance_does_not_require_participant_or_access_reference(self):
+        row = device(1, [])
+        for key in ('attendance_user_id', 'attendance_access_type', 'attendance_traffic_type'):
+            row.pop(key)
+        self.assertEqual(len(prepare.select([row], ['saveDeviceTrafficAttendance'], 1, 1, '2026-11-14')), 1)
+        with self.assertRaisesRegex(ValueError, 'active user'):
+            prepare.select([row], ['saveTrafficAttendance'], 1, 1, '2026-11-14')
+        row['attendance_user_id'] = 10
+        with self.assertRaisesRegex(ValueError, 'access type'):
+            prepare.select([row], ['saveTrafficAttendance'], 1, 1, '2026-11-14')
+
+    def test_bulk_passenger_preparation_and_dates(self):
+        rows = [device(1, [10, 11])]
+        result = prepare.select(rows, [prepare.BULK], 1, 10, '2026-11-14')
+        self.assertEqual([p['passenger_id'] for p in result[0]['passengers']], [10, 11])
+        with self.assertRaisesRegex(ValueError, 'at least one valid'):
+            prepare.select([device(1, [])], [prepare.BULK], 1, 1, '2026-11-14')
+        with self.assertRaisesRegex(ValueError, 'date'):
+            prepare.select(rows, [prepare.BULK], 1, 1, '2026-11-15')
+        for stamp in ('2026-03-08T02:30:00Z', '2026-11-01T01:30:00Z'):
+            with self.assertRaisesRegex(ValueError, 'ambiguous or nonexistent'):
+                prepare.validate_dates([prepare.BULK], 1, stamp)
 
     def test_other_services_do_not_require_passengers(self):
         self.assertEqual(len(prepare.select([device(1, [])], ['beginARoute'], 1, 100, '2026-11-14')), 1)

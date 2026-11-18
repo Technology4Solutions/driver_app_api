@@ -5,7 +5,7 @@ use std::{env, time::Duration};
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
 #[derive(Clone)]
-pub(super) struct Broadcaster {
+pub(crate) struct Broadcaster {
     pub enabled: bool,
     client: reqwest::Client,
     url: String,

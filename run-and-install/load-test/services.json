@@ -2,7 +2,8 @@
   "deviceStatus": {
     "label": "Device status",
     "path": "/device/DeviceStatus/update",
-    "namespace": "DeviceStatus"
+    "namespace": "DeviceStatus",
+    "queued": true
   },
   "beginARoute": {
     "label": "Begin a route",
@@ -84,12 +85,13 @@
     ]
   },
   "allServices": {
-    "label": "All 13 business services",
+    "label": "All 16 business services",
     "steps": [
       "deviceStatus",
       "beginARoute",
       "beginAMergeRoute",
       "executeAnAccessOfAUserInABus",
+      "bulkUserAccess",
       "sendNotification",
       "sendNextStopNotification",
       "sendSkippedStopNotification",
@@ -98,7 +100,30 @@
       "endARoute",
       "interruptARoute",
       "endAMergedRoute",
-      "interruptAMergedRoute"
+      "interruptAMergedRoute",
+      "saveDeviceTrafficAttendance",
+      "saveTrafficAttendance"
     ]
+  },
+  "saveDeviceTrafficAttendance": {
+    "label": "Device attendance event",
+    "path": "/api/Device/saveDeviceTrafficAttendance",
+    "namespace": "Device",
+    "category": "Attendance",
+    "queued": true
+  },
+  "saveTrafficAttendance": {
+    "label": "User attendance access",
+    "path": "/api/Device/saveTrafficAttendance",
+    "namespace": "UserAccess",
+    "category": "Attendance",
+    "queued": true
+  },
+  "bulkUserAccess": {
+    "label": "Bulk passenger access \u00b7 up to 10 passengers/request",
+    "path": "/api/DeviceAccess/bulkUserAccess",
+    "namespace": "BulkUserAccess",
+    "category": "Passenger access",
+    "queued": true
   }
 }
