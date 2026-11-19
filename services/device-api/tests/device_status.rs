@@ -1,3 +1,7 @@
+#[path = "support/jwt.rs"]
+mod jwt;
+use jwt::support_token;
+
 use axum::{body::Body, http::Request, Extension, Router};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use device_api::{device_status::Config, router, telemetry::Metrics};
@@ -9,6 +13,7 @@ use tower::ServiceExt;
 
 fn config(endpoint: &str) -> Config {
     Config {
+        jwt_secret: "test-signing-secret-at-least-32-bytes".into(),
         username: "api-user".into(),
         password: "api:password".into(),
         previous_password: "old-password".into(),
@@ -39,7 +44,7 @@ async fn post(app: Router, auth: Option<&str>, body: &str) -> Value {
     serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap()
 }
 fn authorization(password: &str) -> String {
-    format!("Basic {}", STANDARD.encode(format!("api-user:{password}")))
+    support_token("api-user", password)
 }
 fn lazy_pool() -> MySqlPool {
     MySqlPoolOptions::new()
@@ -72,7 +77,7 @@ async fn authentication_fails_closed_before_database_access() {
 }
 
 #[tokio::test]
-async fn current_and_previous_passwords_accept_basic_auth_and_validate_payload() {
+async fn bearer_tokens_validate_payload() {
     let router = app(lazy_pool(), config("tcp://127.0.0.1:1"));
     for password in ["api:password", "old-password"] {
         let auth = authorization(password);

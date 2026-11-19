@@ -156,7 +156,7 @@ pub(super) async fn store(
             .as_deref()
             .filter(|m| !m.is_empty() && *m != "0"),
     ) {
-        // Device requests use Basic API credentials rather than a user session.
+        // Device requests use JWT bearer tokens rather than a user session.
         // Attribute the required integer audit field to the reporting driver.
         sqlx::query("INSERT INTO alerts (alert_name,alert_message,trace_id,traffic_type_id,alert_date,bus_id,id_route,device_traffic_id,session_id) VALUES (?,?,?,?,?,?,?,?,?)")
             .bind(name).bind(message).bind(&request.trace_id).bind(action.traffic_type())

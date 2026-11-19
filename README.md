@@ -73,13 +73,13 @@ To also verify the MySQL connection using `.env`:
 cargo test -p device-api --test database -- --ignored
 ```
 
-JSON logs and Prometheus metrics are included. Alert notification delivery requires Alertmanager configuration later. The DeviceStatus endpoint requires shared Basic authentication. The greeting and admin endpoints do not require authentication; keep the admin listener private.
+JSON logs and Prometheus metrics are included. Alert notification delivery requires Alertmanager configuration later. The DeviceStatus endpoint requires shared JWT bearer authentication. The greeting and admin endpoints do not require authentication; keep the admin listener private.
 
 ## Device status update
 
 `POST /api/DeviceStatus/updateStatus` follows the Java `reaxium-device-api` queue workflow.
 The existing `/device/DeviceStatus/update` path is an alias. Both accept JSON in the
-`ReaxiumParameters.DeviceStatus` envelope and keep the existing shared Basic authentication
+`ReaxiumParameters.DeviceStatus` envelope and keep the shared JWT bearer authentication
 (`REAXIUM_API_USER` / `REAXIUM_API_PASSWORD`, with the existing rotation aliases).
 
 The HTTP handler validates input and publishes a persistent RabbitMQ message with a publisher
@@ -179,7 +179,7 @@ failed table and operation. Broadcast failures occur after acknowledgement and d
 ## Start a route (ported from ReaxiumCloud)
 
 `POST /DeviceTraffic/beginARoute` (also `/school_bus_cloud/DeviceTraffic/beginARoute`)
-uses the same `.env` Basic authentication as DeviceStatus. The payload is in
+uses the same `.env` JWT bearer authentication as DeviceStatus. The payload is in
 [`run-and-install/json/begin-route.example.json`](run-and-install/json/begin-route.example.json).
 Numeric fields accept JSON numbers or numeric strings. Dates accept `YYYY-MM-DD HH:MM:SS`
 and the Android device format `MM/DD/YYYY HH:MM:SS` (month first). Legacy doubled
@@ -261,7 +261,7 @@ trigger writes, rollback, TIMESTAMP serialization, and truthful partial-failure 
 ## Send alarm notifications
 
 `POST /Alarm/sendNotification` and `/school_bus_cloud/Alarm/sendNotification`
-implement ReaxiumCloud's alarm traffic workflow. Use the same Basic authentication
+implement ReaxiumCloud's alarm traffic workflow. Use the same JWT bearer authentication
 as the other driver API endpoints and `ReaxiumParameters.Notification` with required
 `notification_type`, `device_id`, `stop_id`, `route_id`, `driver_id`, `trace_id`,
 `latitude`, `longitude`, and `bus_info`. IDs and coordinates accept numeric strings;
@@ -278,7 +278,7 @@ If that assignment has no usable bus number, it falls back to the bus identified
 row linked by `device_traffic_id` when `alert_message` is nonempty (PHP also treats
 `"0"` as empty). Omitting the message records traffic without an alert row. The required integer
 `alerts.session_id` audit field is populated with the reporting `driver_id`, since
-device API requests authenticate with Basic credentials rather than a user session.
+device API requests authenticate with JWT bearer authentication rather than a user session.
 
 The shared pipeline publishes enriched traffic to interested business WebSocket
 channels with the appropriate traffic label. Ordinary alarms skip Vision; route
@@ -286,7 +286,7 @@ start/end/interruption types retain the shared activity and Vision behavior. Typ
 14 here does not automatically drop passengers. No SMS, email or parent push is
 sent directly.
 
-Compared with PHP, this API retains the driver's Basic authentication, stricter
+Compared with PHP, this API retains the driver's JWT bearer authentication, stricter
 input validation, atomic database writes and explicit downstream failure reporting.
 Success returns code `0` and an empty object array; code `3` with
 `object.database_saved: true` means the event was saved but delivery was incomplete.
@@ -302,7 +302,7 @@ curl -i -u "$REAXIUM_API_USER:$REAXIUM_API_PASSWORD" \
 ## Send next-stop notifications
 
 `POST /Alarm/sendNextStopNotification` and
-`/school_bus_cloud/Alarm/sendNextStopNotification` accept the same Basic authentication
+`/school_bus_cloud/Alarm/sendNextStopNotification` accept the same JWT bearer authentication
 and `ReaxiumParameters.Notification` fields as `sendNotification`. The
 `notification_type` field is required and non-null, but its value is ignored:
 this endpoint always saves traffic type **5**, situation **1**, and current server
@@ -324,7 +324,7 @@ curl -i -u "$REAXIUM_API_USER:$REAXIUM_API_PASSWORD" \
 ## Send skipped-stop notifications
 
 `POST /Alarm/sendSkippedStopNotification` and
-`/school_bus_cloud/Alarm/sendSkippedStopNotification` use Basic authentication and
+`/school_bus_cloud/Alarm/sendSkippedStopNotification` use JWT bearer authentication and
 `ReaxiumParameters.Notification`, with the same required fields as next-stop requests.
 `notification_type` is required and non-null but its value is ignored. Traffic type
 is always **18**, situation **1**, and event time is current server time in
@@ -336,7 +336,7 @@ interested business channels. No `alerts` record, device activity change, passen
 drop-off or Vision packet is produced, even when an alert message is supplied.
 To match ReaxiumCloud, `assigned_bus` comes only from the latest route assignment;
 it does not use the `bus_info` fallback added to the other notification endpoints.
-The shared Rust API retains Basic authentication, stricter validation, transactional
+The shared Rust API retains JWT bearer authentication, stricter validation, transactional
 writes and explicit delivery failure reporting (`database_saved: true` after a saved
 event with incomplete publication). These operational behaviors differ from PHP.
 
@@ -350,7 +350,7 @@ curl -i -u "$REAXIUM_API_USER:$REAXIUM_API_PASSWORD" \
 ## Send manual skipped-stop notifications
 
 `POST /Alarm/sendManualSkippedStopNotification` and
-`/school_bus_cloud/Alarm/sendManualSkippedStopNotification` use Basic authentication
+`/school_bus_cloud/Alarm/sendManualSkippedStopNotification` use JWT bearer authentication
 and `ReaxiumParameters.Notification`. Required fields are `device_id`, `stop_id`,
 `route_id`, `driver_id`, `trace_id`, `traffic_date`, `latitude`, `longitude`, and
 `bus_info` (a bus ID). `notification_type` is not required and is ignored.
@@ -368,7 +368,7 @@ failure reporting remain in place. See
 ## Send device traffic
 
 `POST /DeviceTraffic/sendTraffic` and `/school_bus_cloud/DeviceTraffic/sendTraffic`
-use the route endpoints' Basic authentication and `ReaxiumParameters.DeviceTraffic`
+use the route endpoints' JWT bearer authentication and `ReaxiumParameters.DeviceTraffic`
 payload. `traffic_type_id` is required (positive integer or numeric string);
 `traffic_situation_id` defaults to `1`. Dates use `YYYY-MM-DD HH:mm:ss` and
 `bus_info` is a positive bus ID string. See `run-and-install/json/send-traffic.example.json`.
@@ -394,7 +394,7 @@ source changes: `docker compose up -d --build --no-deps api`.
 ## Interrupt a route
 
 `POST /DeviceTraffic/interruptARoute` and
-`/school_bus_cloud/DeviceTraffic/interruptARoute` use the same Basic authentication
+`/school_bus_cloud/DeviceTraffic/interruptARoute` use the same JWT bearer authentication
 and payload validation as `endARoute`. Use a positive bus ID string for `bus_info`
 and `YYYY-MM-DD HH:mm:ss` for `traffic_date` (legacy double colons also work).
 `traffic_situation_id` is required.
@@ -525,7 +525,7 @@ when deriving the database host). Explicit pool settings are validated before st
 - DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD; alternatively Java's
   SCHOOL_BUS_DATASOURCE_URL (jdbc:mysql://host:port/database),
   SCHOOL_BUS_DATASOURCE_USERNAME and SCHOOL_BUS_DATASOURCE_PASSWORD.
-- REAXIUM_API_USER and REAXIUM_API_PASSWORD for device API authentication.
+- REAXIUM_API_USER and REAXIUM_API_PASSWORD for the token endpoint, and REAXIUM_API_JWT_SECRET for signing tokens.
 - RABBITMQ_USER and RABBITMQ_PASSWORD. They initialize the bundled broker and must
   continue to match existing broker storage. RabbitMQ and Redis have dedicated
   stack volumes and internal endpoints; host ports are not published.
@@ -631,7 +631,7 @@ configured infrastructure. Ignored database integration tests remain in GitHub C
 ## Start merged routes
 
 `POST /DeviceTraffic/beginAMergeRoute` and
-`/school_bus_cloud/DeviceTraffic/beginAMergeRoute` use the existing Basic credentials
+`/school_bus_cloud/DeviceTraffic/beginAMergeRoute` use the JWT bearer authentication
 and `ReaxiumParameters.DeviceTraffic`. Required fields are `device_id`, `route_ids`
 (a comma-separated string, e.g. `"107,108"`), `driver_id`, `trace_id`, `latitude`,
 `longitude`, `bus_info` (bus ID), and `traffic_date`. No stop ID is required.
@@ -652,7 +652,7 @@ remaining routes are still processed. Full success returns code 0 and an empty
 object array; errors return code 3 with `object.routes` containing attempted route
 results. Inspect those results and the database before retrying; repeated route
 IDs and repeated requests are not deduplicated. Compared with PHP, this API retains
-Basic authentication, stricter validation, per-route transactions, explicit missing
+JWT bearer authentication, stricter validation, per-route transactions, explicit missing
 stop errors and downstream delivery reporting.
 
 ```bash
@@ -669,7 +669,7 @@ serially (`--test-threads=1`).
 ## End merged routes
 
 `POST /DeviceTraffic/endAMergedRoute` and
-`/school_bus_cloud/DeviceTraffic/endAMergedRoute` use the existing Basic credentials
+`/school_bus_cloud/DeviceTraffic/endAMergedRoute` use the JWT bearer authentication
 and `ReaxiumParameters.DeviceTraffic`. Use the merged-start fields plus required
 `traffic_situation_id` (a positive integer or numeric string). The service forces
 traffic type **4**, preserving the supplied situation, date and trace ID. Use the
@@ -696,7 +696,7 @@ curl -i -u "$REAXIUM_API_USER:$REAXIUM_API_PASSWORD" \
 ## Interrupt merged routes
 
 `POST /DeviceTraffic/interruptAMergedRoute` and
-`/school_bus_cloud/DeviceTraffic/interruptAMergedRoute` use Basic authentication and
+`/school_bus_cloud/DeviceTraffic/interruptAMergedRoute` use JWT bearer authentication and
 the same `ReaxiumParameters.DeviceTraffic` fields as merged end. Supply the active
 run's `trace_id`, comma-separated `route_ids`, event date, coordinates, bus ID and
 required positive `traffic_situation_id`. Type is forced to **14**; situation and
@@ -735,7 +735,7 @@ curl -i -u "$REAXIUM_API_USER:$REAXIUM_API_PASSWORD" \
 ## Record passenger access
 
 `POST /UserAccess/executeAnAccessOfAUserInABus` and
-`/school_bus_cloud/UserAccess/executeAnAccessOfAUserInABus` use Basic authentication
+`/school_bus_cloud/UserAccess/executeAnAccessOfAUserInABus` use JWT bearer authentication
 and `ReaxiumParameters.UserAccess`. Legacy Volley duplicate JSON content types are
 normalized before strict JSON parsing. Logs identify request arrival, rejection reason,
 and final database/publication status without logging credentials. With `LOG_LEVEL=DEBUG`,
@@ -772,11 +772,11 @@ parent push/email/SMS in this service. Boardings with the same trace ID are avai
 to route-interruption automatic drop-offs.
 
 Success returns application code 0, `SUCCESSFUL REQUEST`, and an empty object array.
-Validation/storage errors use code 13 (Basic authentication rejection uses code 3,
+Validation/storage errors use code 13 (JWT bearer authentication rejection uses code 3,
 consistent with other Rust endpoints). A publication failure reports code 13 with
 `object.database_saved: true`, `traffic_id` and `broadcast_status`; do not resubmit
 that saved event. Disabling broadcasts skips enrichment and network IO. Compared
-with PHP, the API retains stricter validation, Basic credentials, transactions,
+with PHP, the API retains stricter validation, JWT bearer authentication, transactions,
 sanitized error messages and explicit delivery reporting. It does not upsert or
 ignore duplicates: the database's existing unique key remains authoritative.
 
@@ -832,7 +832,7 @@ model; it is not a highly available logging cluster.
 
 ## Device attendance session events
 
-`POST /api/Device/saveDeviceTrafficAttendance` uses the shared Basic credentials
+`POST /api/Device/saveDeviceTrafficAttendance` uses the shared JWT bearer authentication
 and accepts `ReaxiumParameters.Device`, matching the Java service. Example:
 
 ```json
@@ -878,7 +878,7 @@ TEST_RABBITMQ_URL='amqp://guest:guest@127.0.0.1:5672/%2f' \
 ## Individual attendance access
 
 `POST /api/Device/saveTrafficAttendance` records a user's attendance access through
-RabbitMQ, matching the Java service. It uses the shared Basic credentials and JSON
+RabbitMQ, matching the Java service. It uses the shared JWT bearer authentication and JSON
 (including legacy duplicate JSON content types). Example payload:
 
 ```json
@@ -937,7 +937,7 @@ curl -i --user "$REAXIUM_API_USER:$REAXIUM_API_PASSWORD" \
 
 `POST /api/DeviceAccess/bulkUserAccess` and its device-client alias
 `/device/DeviceAccess/bulkUserAccess` accept `ReaxiumParameters.BulkUserAccess`
-using the existing shared Basic credentials. See
+using the shared JWT bearer authentication. See
 `run-and-install/json/bulk-user-access.example.json`. Replace the fixture IDs and
 `accessDate` (Unix milliseconds) with valid test values before sending:
 
@@ -1026,3 +1026,40 @@ SELECT * FROM traffic WHERE trace_id = 'bulk-access-test-001';
 SELECT id, title, topic, status, device_id FROM messages
 WHERE topic = 'DEVICE_ACCESS' ORDER BY id DESC LIMIT 10;
 ```
+
+
+## JWT authentication
+
+All protected device API endpoints now require `Authorization: Bearer <access_token>`;
+Basic headers are rejected. Existing endpoint aliases and application error envelopes
+are preserved. The public greeting and private admin listener keep their existing behavior.
+
+Configure `REAXIUM_API_JWT_SECRET` with a random secret of at least 32 bytes, for example
+from `openssl rand -hex 32`. Use the same secret across API replicas and keep it separate
+from the API password. Local Compose passes this setting through; for Swarm add it to
+the application's Vault bundle before deploying. Changing it invalidates issued tokens.
+
+Request a token with `POST /api/auth/token`, `Content-Type: application/json`:
+
+```json
+{"username":"<REAXIUM_API_USER>","password":"<REAXIUM_API_PASSWORD>"}
+```
+
+A successful response is HTTP 200:
+
+```json
+{"access_token":"<signed JWT>","token_type":"Bearer","expires_in":3600}
+```
+
+Invalid credentials return HTTP 401; malformed JSON or missing fields return HTTP 400.
+The existing credential environment aliases and `REAXIUM_API_PASSWORD_PREVIOUS` are
+accepted at login. Passwords are never included in tokens. Tokens use HS256 with
+validated expiration, issuer, audience and subject. Obtain a new token before its
+one-hour expiry; there is no refresh token endpoint. Password rotation affects new
+logins; already issued tokens remain valid until expiry or signing-secret rotation.
+Use HTTPS when sending credentials or bearer tokens outside localhost.
+
+Clients must obtain a token before calling protected endpoints. `test-api.sh` and
+the k6 route runner now perform this login automatically using the existing API
+username/password variables. Outbound dashboard/dispatcher authentication and the
+k6 web control panel's own Basic login are separate and retain their existing behavior.

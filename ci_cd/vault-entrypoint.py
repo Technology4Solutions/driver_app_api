@@ -69,6 +69,8 @@ def configuration(environ, bundle, mode):
     for key in ['DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASSWORD', 'REAXIUM_API_USER', 'REAXIUM_API_PASSWORD']:
         if not result.get(key):
             raise ConfigurationError(f'Missing application setting: {key}')
+    if len(result.get('REAXIUM_API_JWT_SECRET', '').encode()) < 32:
+        raise ConfigurationError('REAXIUM_API_JWT_SECRET must contain at least 32 bytes')
     if not result.get('RABBITMQ_URL'):
         user = quote(require('RABBITMQ_USER'), safe='')
         password = quote(require('RABBITMQ_PASSWORD'), safe='')

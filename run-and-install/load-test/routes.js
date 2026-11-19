@@ -1,5 +1,4 @@
 import http from 'k6/http';
-import encoding from 'k6/encoding';
 import exec from 'k6/execution';
 import { SharedArray } from 'k6/data';
 import { check, sleep } from 'k6';
@@ -36,8 +35,22 @@ for (const action of steps) thresholds[`application_success{endpoint:${action}}`
 export const options = {
   scenarios: {services: {executor: 'per-vu-iterations', vus, iterations, maxDuration: __ENV.MAX_DURATION || '30m'}}, thresholds,
 };
-const headers = {'Content-Type': 'application/json', Authorization: `Basic ${encoding.b64encode(`${__ENV.REAXIUM_API_USER}:${__ENV.REAXIUM_API_PASSWORD}`)}`};
+const headers = {'Content-Type': 'application/json'};
+let expiresAt = 0;
+function authenticate() {
+  if (Date.now() < expiresAt) return;
+  const res = http.post(`${base.replace(/\/school_bus_cloud$/, '')}/api/auth/token`, JSON.stringify({
+    username: __ENV.REAXIUM_API_USER, password: __ENV.REAXIUM_API_PASSWORD,
+  }), {headers: {'Content-Type': 'application/json'}, timeout: '30s', redirects: 0, tags: {name: 'auth/token'}});
+  let token;
+  try { token = res.json(); } catch (_) { exec.test.abort('Token endpoint returned invalid JSON'); }
+  if (res.status !== 200 || !token.access_token || !(token.expires_in > 60)) exec.test.abort('API login failed');
+  headers.Authorization = `Bearer ${token.access_token}`;
+  expiresAt = Date.now() + (token.expires_in - 60) * 1000;
+}
+
 function post(action, data, d) {
+  authenticate();
   const descriptor = catalog[action];
   const queued = descriptor.queued === true;
   const requestBase = queued ? base.replace(/\/school_bus_cloud$/, '') : base;

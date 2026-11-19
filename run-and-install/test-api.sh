@@ -57,18 +57,27 @@ api_password="${REAXIUM_API_PASSWORD:-${REAXIUM_API_BASIC_AUTH_PASSWORD:-}}"
 if [[ -z "$api_username" ]]; then read -r -p 'API username: ' api_username; fi
 if [[ -z "$api_password" ]]; then read -r -s -p 'API password: ' api_password; echo; fi
 [[ -n "$api_username" && -n "$api_password" ]] || { echo 'API credentials must not be empty.' >&2; exit 1; }
-# Put credentials in a private curl config, not the process command line or logs.
+# Keep login credentials and bearer tokens out of process arguments and logs.
 printf '%s\0%s' "$api_username" "$api_password" | python3 -c '
-import base64, pathlib, sys
+import json, pathlib, sys
 user, password = sys.stdin.buffer.read().split(b"\0", 1)
-if b":" in user:
-    sys.exit("The Basic-auth username cannot contain a colon")
-header = base64.b64encode(user + b":" + password).decode("ascii")
 p = pathlib.Path(sys.argv[1])
 p.touch(mode=0o600)
-p.write_text("header = \"Authorization: Basic " + header + "\"\n")
-' "$work_dir/auth.conf"
+p.write_text(json.dumps({"username": user.decode(), "password": password.decode()}))
+' "$work_dir/login.json"
 unset api_password
+curl --fail --silent --show-error --connect-timeout 5 --max-time 15 \
+  -H 'Content-Type: application/json' --data-binary "@$work_dir/login.json" \
+  "${API_BASE_URL%/}/api/auth/token" > "$work_dir/token.json"
+python3 - "$work_dir/token.json" "$work_dir/auth.conf" <<'PYTOKEN'
+import json, pathlib, re, sys
+token = json.loads(pathlib.Path(sys.argv[1]).read_text())["access_token"]
+if not re.fullmatch(r"[A-Za-z0-9_.-]+", token):
+    sys.exit("Invalid bearer token response")
+p = pathlib.Path(sys.argv[2])
+p.touch(mode=0o600)
+p.write_text('header = "Authorization: Bearer ' + token + '"\n')
+PYTOKEN
 
 echo 'Submitting telemetry: this writes to the configured database.'
 # Do not retry POST: doing so could insert duplicate location records.

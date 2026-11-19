@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Exercise real k6 requests against a local mock; never contacts the real API."""
-import base64
 import json
 import os
 from pathlib import Path
@@ -13,8 +12,16 @@ records = []
 mode = 'success'
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
-        parameters = json.loads(self.rfile.read(int(self.headers['Content-Length'])))['ReaxiumParameters']
-        assert self.headers['Authorization'] == 'Basic ' + base64.b64encode(b'mock-user:mock-password').decode()
+        body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+        if self.path == '/api/auth/token':
+            assert body == {'username': 'mock-user', 'password': 'mock-password'}
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({'access_token': 'mock.jwt.token', 'token_type': 'Bearer', 'expires_in': 3600}).encode())
+            return
+        parameters = body['ReaxiumParameters']
+        assert self.headers['Authorization'] == 'Bearer mock.jwt.token'
         payload = next(iter(parameters.values()))
         catalog = json.loads(Path(__file__).with_name('services.json').read_text())
         descriptor = next(entry for entry in catalog.values() if entry.get('path') == self.path.replace('/school_bus_cloud', ''))

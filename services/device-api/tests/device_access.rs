@@ -1,5 +1,4 @@
 use axum::{body::Body, http::{Request, StatusCode}, Extension, Router};
-use base64::{engine::general_purpose::STANDARD, Engine};
 use device_api::{device_access::queue, device_status::Config, router, telemetry::Metrics};
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
@@ -8,12 +7,13 @@ use std::{sync::Arc, time::Duration};
 use tower::ServiceExt;
 
 fn config() -> Config {
-    Config {username:"test".into(),password:"fixture-password".into(),previous_password:String::new(),broadcast_enabled:false,broadcast_endpoint:String::new(),broadcast_timeout:Duration::from_secs(1)}
+    Config {jwt_secret: "test-signing-secret-at-least-32-bytes".into(),
+        username:"test".into(),password:"fixture-password".into(),previous_password:String::new(),broadcast_enabled:false,broadcast_endpoint:String::new(),broadcast_timeout:Duration::from_secs(1)}
 }
 fn app() -> Router {router(Metrics::new().unwrap()).layer(Extension(Arc::new(config())))}
 async fn post(app: Router, path: &str, body: &str, auth: bool) -> (StatusCode, Value) {
     let mut request = Request::post(path).header("content-type","application/json");
-    if auth {request=request.header("authorization",format!("Basic {}",STANDARD.encode("test:fixture-password")));}
+    if auth {request=request.header("authorization",format!("Bearer {}",device_api::auth::issue_token(&config()).unwrap()));}
     let response=app.oneshot(request.body(Body::from(body.to_owned())).unwrap()).await.unwrap();
     let status=response.status();
     (status,serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap())

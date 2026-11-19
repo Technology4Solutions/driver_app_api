@@ -7,7 +7,6 @@ mod repository;
 
 use crate::json_body::LegacyJson;
 use axum::{extract::rejection::JsonRejection, http::HeaderMap, Extension, Json};
-use base64::{engine::general_purpose::STANDARD, Engine};
 pub use model::Update;
 use serde_json::{json, Value};
 use std::{env, sync::Arc, time::Duration};
@@ -16,6 +15,7 @@ use subtle::ConstantTimeEq;
 /// Shared API credentials, using the same names and rotation aliases as ReaxiumCloud.
 #[derive(Clone)]
 pub struct Config {
+    pub jwt_secret: String,
     pub username: String,
     pub password: String,
     pub previous_password: String,
@@ -46,7 +46,12 @@ impl Config {
             broadcast_enabled,
             "dashboard broadcast configuration loaded"
         );
+        let jwt_secret = env::var("REAXIUM_API_JWT_SECRET").unwrap_or_default();
+        if jwt_secret.len() < 32 {
+            return Err("REAXIUM_API_JWT_SECRET must contain at least 32 bytes".into());
+        }
         Ok(Self {
+            jwt_secret,
             broadcast_enabled,
             username: first(&["REAXIUM_API_USER", "REAXIUM_API_BASIC_AUTH_USERNAME"]),
             password: first(&["REAXIUM_API_PASSWORD", "REAXIUM_API_BASIC_AUTH_PASSWORD"]),
@@ -58,23 +63,10 @@ impl Config {
     }
 
     pub(crate) fn authorized(&self, headers: &HeaderMap) -> bool {
-        let Some(header) = headers.get("authorization").and_then(|h| h.to_str().ok()) else {
-            return false;
-        };
-        let Some((scheme, encoded)) = header.split_once(' ') else {
-            return false;
-        };
-        if !scheme.eq_ignore_ascii_case("basic") {
-            return false;
-        }
-        let Ok(bytes) = STANDARD.decode(encoded.trim()) else {
-            return false;
-        };
-        let Some(colon) = bytes.iter().position(|b| *b == b':') else {
-            return false;
-        };
-        let user = &bytes[..colon];
-        let password = &bytes[colon + 1..];
+        crate::auth::authorized(self, headers)
+    }
+
+    pub(crate) fn credentials_match(&self, user: &[u8], password: &[u8]) -> bool {
         let user_matches =
             !self.username.is_empty() & bool::from(user.ct_eq(self.username.as_bytes()));
         let current =

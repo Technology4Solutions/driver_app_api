@@ -1,5 +1,8 @@
+#[path = "support/jwt.rs"]
+mod jwt;
+use jwt::support_token;
+
 use axum::{body::Body, http::Request, Extension, Router};
-use base64::{engine::general_purpose::STANDARD, Engine};
 use device_api::{device_status::Config, router, telemetry::Metrics};
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
@@ -22,6 +25,7 @@ fn app(pool: MySqlPool, endpoint: &str, enabled: bool) -> Router {
     router(Metrics::new().unwrap())
         .layer(Extension(pool))
         .layer(Extension(Arc::new(Config {
+            jwt_secret: "test-signing-secret-at-least-32-bytes".into(),
             username: "test".into(),
             password: "test-password".into(),
             previous_password: "previous".into(),
@@ -35,7 +39,7 @@ async fn post(app: Router, path: &str, input: Value, password: Option<&str>) -> 
     if let Some(password) = password {
         request = request.header(
             "authorization",
-            format!("Basic {}", STANDARD.encode(format!("test:{password}"))),
+            support_token("test", password),
         );
     }
     let response = app
@@ -385,7 +389,7 @@ async fn legacy_volley_headers_reach_access_validation_on_both_paths() {
         ] {
             let mut request = Request::post(path).header(
                 "authorization",
-                format!("Basic {}", STANDARD.encode("test:test-password")),
+                support_token("test", "test-password"),
             );
             for content_type in content_types {
                 request = request.header("content-type", content_type);
@@ -449,7 +453,7 @@ async fn legacy_access_headers_preserve_auth_json_and_body_size_checks() {
             if authenticated {
                 request = request.header(
                     "authorization",
-                    format!("Basic {}", STANDARD.encode("test:test-password")),
+                    support_token("test", "test-password"),
                 );
             }
             let response = app

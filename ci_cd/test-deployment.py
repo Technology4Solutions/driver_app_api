@@ -52,6 +52,11 @@ class ConfigurationTests(unittest.TestCase):
             module.configuration({'ENVIRONMENT': 'DEV'}, bundle, 'api')
         self.assertEqual(str(error.exception), 'Missing application setting: REAXIUM_API_USER')
 
+    def test_jwt_secret_required(self):
+        for secret in ('', 'short'):
+            with self.assertRaisesRegex(module.ConfigurationError, 'REAXIUM_API_JWT_SECRET'):
+                module.configuration({'ENVIRONMENT': 'DEV'}, dict(self.bundle(), REAXIUM_API_JWT_SECRET=secret), 'api')
+
     def test_shared_vault_path_and_override(self):
         for mode in ('api', 'rabbitmq'):
             for environment in ('DEV', 'PROD'):
@@ -76,6 +81,7 @@ class ConfigurationTests(unittest.TestCase):
         return dict(SCHOOL_BUS_DATASOURCE_URL='jdbc:mysql://db:3307/school_bus?useSSL=false',
                     SCHOOL_BUS_DATASOURCE_USERNAME='test', SCHOOL_BUS_DATASOURCE_PASSWORD='test',
                     REAXIUM_API_USER='api', REAXIUM_API_PASSWORD='test',
+                    REAXIUM_API_JWT_SECRET='test-signing-secret-at-least-32-bytes',
                     RABBITMQ_USER='a@b', RABBITMQ_PASSWORD='a/b:c', BROADCAST_ENABLED=False)
 
     def test_kv_detection_matches_java_with_wrapped_metadata_support(self):

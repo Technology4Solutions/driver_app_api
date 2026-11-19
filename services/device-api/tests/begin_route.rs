@@ -1,5 +1,8 @@
+#[path = "support/jwt.rs"]
+mod jwt;
+use jwt::support_token;
+
 use axum::{body::Body, http::Request, Extension, Router};
-use base64::{engine::general_purpose::STANDARD, Engine};
 use device_api::{
     device_status::Config,
     device_traffic::{BeginRoute, VisionConfig},
@@ -31,6 +34,7 @@ fn make_app(pool: MySqlPool, endpoint: &str, udp: Option<SocketAddr>) -> Router 
     router(Metrics::new().unwrap())
         .layer(Extension(pool))
         .layer(Extension(Arc::new(Config {
+            jwt_secret: "test-signing-secret-at-least-32-bytes".into(),
             username: "test".into(),
             password: "test-password".into(),
             previous_password: "previous".into(),
@@ -49,7 +53,7 @@ async fn post(app: Router, path: &str, body: Value, password: Option<&str>) -> V
     if let Some(password) = password {
         request = request.header(
             "authorization",
-            format!("Basic {}", STANDARD.encode(format!("test:{password}"))),
+            support_token("test", password),
         );
     }
     let response = app
@@ -151,7 +155,7 @@ async fn legacy_volley_duplicate_json_headers_reach_payload_validation() {
         ] {
             let mut request = Request::post(path).header(
                 "authorization",
-                format!("Basic {}", STANDARD.encode("test:test-password")),
+                support_token("test", "test-password"),
             );
             for content_type in content_types {
                 request = request.header("content-type", content_type);
@@ -211,7 +215,7 @@ async fn legacy_json_header_compatibility_preserves_auth_parser_and_size_limit()
         if authenticated {
             request = request.header(
                 "authorization",
-                format!("Basic {}", STANDARD.encode("test:test-password")),
+                support_token("test", "test-password"),
             );
         }
         let response = app
@@ -523,6 +527,7 @@ async fn saves_broadcasts_sends_udp_and_reports_rollback_and_partial_failure() {
     let disabled = router(Metrics::new().unwrap())
         .layer(Extension(pool.clone()))
         .layer(Extension(Arc::new(Config {
+            jwt_secret: "test-signing-secret-at-least-32-bytes".into(),
             username: "test".into(),
             password: "test-password".into(),
             previous_password: String::new(),
@@ -1184,6 +1189,7 @@ async fn alarm_notifications_save_optional_alerts_and_broadcast() {
     let disabled = router(Metrics::new().unwrap())
         .layer(Extension(pool.clone()))
         .layer(Extension(Arc::new(Config {
+            jwt_secret: "test-signing-secret-at-least-32-bytes".into(),
             username: "test".into(),
             password: "test-password".into(),
             previous_password: String::new(),

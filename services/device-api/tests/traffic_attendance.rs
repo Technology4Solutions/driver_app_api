@@ -1,9 +1,12 @@
+#[path = "support/jwt.rs"]
+mod jwt;
+use jwt::support_token;
+
 use axum::{
     body::Body,
     http::{Request, StatusCode},
     Extension,
 };
-use base64::{engine::general_purpose::STANDARD, Engine};
 use device_api::{device_status::Config, router, telemetry::Metrics};
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
@@ -13,6 +16,7 @@ use tower::ServiceExt;
 #[tokio::test]
 async fn authentication_validation_and_unavailable_queue_keep_response_contract() {
     let app = router(Metrics::new().unwrap()).layer(Extension(Arc::new(Config {
+        jwt_secret: "test-signing-secret-at-least-32-bytes".into(),
         username: "test".into(),
         password: "secret".into(),
         previous_password: String::new(),
@@ -49,7 +53,7 @@ async fn authentication_validation_and_unavailable_queue_keep_response_contract(
         if auth {
             request = request.header(
                 "authorization",
-                format!("Basic {}", STANDARD.encode("test:secret")),
+                support_token("test", "secret"),
             );
         }
         let response = app
@@ -100,6 +104,7 @@ async fn queued_events_are_inserted_without_deduplication() {
     let app = router(Metrics::new().unwrap())
         .layer(Extension(publisher))
         .layer(Extension(Arc::new(Config {
+            jwt_secret: "test-signing-secret-at-least-32-bytes".into(),
             username: "test".into(),
             password: "secret".into(),
             previous_password: String::new(),
@@ -119,7 +124,7 @@ async fn queued_events_are_inserted_without_deduplication() {
                     .header("content-type", "application/json")
                     .header(
                         "authorization",
-                        format!("Basic {}", STANDARD.encode("test:secret")),
+                        support_token("test", "secret"),
                     )
                     .body(Body::from(event.to_string()))
                     .unwrap(),
