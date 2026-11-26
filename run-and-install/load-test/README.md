@@ -113,8 +113,7 @@ Or from `run-and-install`:
 It prompts for the API URL (default localhost:8080), username, hidden password,
 and simulated start date (default today's date in Africa/Casablanca at 08:00).
 It uses `devices.local.json` and defaults to **one device, one journey**. Existing
-exported settings are reused. Load credentials from Vault with:
-`python3 ci_cd/vault-exec.py run-and-install/load-test/start.sh` (from the repository root).
+exported settings are reused.
 The Z suffix is
 only used for deterministic wall-clock formatting as described above.
 

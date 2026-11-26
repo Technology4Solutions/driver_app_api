@@ -9,18 +9,8 @@ Local Docker and Cargo runs read the private, ignored `.env`. Copy `.env.example
 to `.env`, fill in local settings and protect it with `chmod 600 .env`.
 Never force-add this file to Git. Deployment continues to read Vault.
 
-For optional local Vault injection:
-Set CLIENT and ENVIRONMENT (DEV or PROD), and VAULT_TOKEN_FILE to a private,
-read-only token file outside the repository. For Cargo or load tests with Vault use:
-
-```bash
-python3 ci_cd/vault-exec.py cargo run -p device-api
-python3 ci_cd/vault-exec.py run-and-install/load-test/start.sh
-```
-
-Vault defaults and bundle keys are documented in README.md. Local Vault access
-requires HTTPS and validates certificates. The optional Vault wrapper does not write secrets to dotenv files.
-A local bundle must configure reachable DB, RABBITMQ_URL and REDIS_URL endpoints;
+Vault deployment defaults and bundle keys are documented in README.md.
+Local settings must configure reachable DB, RABBITMQ_URL and REDIS_URL endpoints;
 the deployment defaults use Swarm service names.
 
 ## Rotation (requires infrastructure access)
