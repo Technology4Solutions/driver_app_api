@@ -6,7 +6,7 @@ require_command curl
 require_command python3
 if [[ ! -f "$PROJECT_ROOT/.env" ]]; then
   (umask 077; cp -- "$PROJECT_ROOT/.env.example" "$PROJECT_ROOT/.env")
-  echo "Created $PROJECT_ROOT/.env. Set your remote database and shared API credentials."
+  echo "Created $PROJECT_ROOT/.env. Set your local database and API credentials; this file is ignored by Git."
 else
   echo 'Existing .env preserved.'
 fi

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Interactive launcher with optional local fixed credentials.
+# Interactive launcher; credentials are injected by Vault.
 set -euo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 if [[ "${1:-}" == --help || $# -gt 1 ]]; then
@@ -14,14 +14,8 @@ if [[ -z "${API_BASE_URL:-}" ]]; then
   read -r -p 'Test API URL [http://127.0.0.1:8080]: ' API_BASE_URL
   API_BASE_URL="${API_BASE_URL:-http://127.0.0.1:8080}"
 fi
-if [[ -f "$script_dir/credentials.local.sh" ]]; then
-  source "$script_dir/credentials.local.sh"
-  REAXIUM_API_USER="${REAXIUM_API_USER:-${LOAD_TEST_API_USER:-}}"
-  REAXIUM_API_PASSWORD="${REAXIUM_API_PASSWORD:-${LOAD_TEST_API_PASSWORD:-}}"
-  unset LOAD_TEST_API_USER LOAD_TEST_API_PASSWORD
-fi
 if [[ -z "${REAXIUM_API_USER:-}" ]]; then
-  read -r -p 'API username (same as API .env): ' REAXIUM_API_USER
+  read -r -p 'API username: ' REAXIUM_API_USER
 fi
 if [[ -z "${REAXIUM_API_PASSWORD:-}" ]]; then
   read -r -s -p 'API password: ' REAXIUM_API_PASSWORD

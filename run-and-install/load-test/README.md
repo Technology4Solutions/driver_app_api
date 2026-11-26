@@ -113,9 +113,9 @@ Or from `run-and-install`:
 It prompts for the API URL (default localhost:8080), username, hidden password,
 and simulated start date (default today's date in Africa/Casablanca at 08:00).
 It uses `devices.local.json` and defaults to **one device, one journey**. Existing
-exported settings are reused. Local fixed credentials are loaded from `credentials.local.sh` when present;
-exported API credentials take precedence. This local file has mode 600 and is
-excluded from Git and Docker builds. Missing credentials are prompted for. The Z suffix is
+exported settings are reused. Load credentials from Vault with:
+`python3 ci_cd/vault-exec.py run-and-install/load-test/start.sh` (from the repository root).
+The Z suffix is
 only used for deterministic wall-clock formatting as described above.
 
 For eight devices, one journey each:
@@ -205,8 +205,8 @@ and password configured for that environment. The server needs Docker access and
 Python 3; k6 runs in Docker. This command sends up to 800 real device-status
 requests and writes to the configured database.
 
-The archive includes every Git-tracked file, including tracked `.env`,
-`credentials.local.sh`, and datasets. These replace matching files on the server
+The archive includes Git-tracked source files and datasets. Private runtime files
+are ignored and must never be added to the archive. These replace matching files on the server
 during deployment. Untracked/ignored local files and Git history are not included;
 server-only files are left in place.
 
