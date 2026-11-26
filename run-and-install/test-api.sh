@@ -12,8 +12,8 @@ Usage:
 
 API_BASE_URL defaults to http://127.0.0.1:8080.
 ADMIN_BASE_URL defaults to http://127.0.0.1:9090.
-The POST uses REAXIUM_API_USER / REAXIUM_API_PASSWORD from the shell environment,
-or prompts for them. Use the same values configured in the API's .env.
+The POST uses CLOUD_USERNAME / CLOUD_PASSWORD from the shell environment,
+or prompts for them. Enter credentials for an active Cloud database account.
 Omitting device_activity in the payload clears the device's existing activity.
 HELP
 }
@@ -52,8 +52,8 @@ echo 'PASS: GET /health/live'
 [[ -n "$payload" ]] || exit 0
 
 python3 -m json.tool "$payload" >/dev/null
-api_username="${REAXIUM_API_USER:-${REAXIUM_API_BASIC_AUTH_USERNAME:-}}"
-api_password="${REAXIUM_API_PASSWORD:-${REAXIUM_API_BASIC_AUTH_PASSWORD:-}}"
+api_username="${CLOUD_USERNAME:-}"
+api_password="${CLOUD_PASSWORD:-}"
 if [[ -z "$api_username" ]]; then read -r -p 'API username: ' api_username; fi
 if [[ -z "$api_password" ]]; then read -r -s -p 'API password: ' api_password; echo; fi
 [[ -n "$api_username" && -n "$api_password" ]] || { echo 'API credentials must not be empty.' >&2; exit 1; }

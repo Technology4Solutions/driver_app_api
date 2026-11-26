@@ -18,7 +18,7 @@ if (new Set(devices.map(d => String(d.device_id))).size !== devices.length) thro
 devices.slice(0, vus).forEach(d => validateDevice(d, steps));
 const base = (__ENV.API_BASE_URL || '').replace(/\/$/, '');
 if (!/^https?:\/\//.test(base)) throw new Error('Set API_BASE_URL explicitly to the isolated test API');
-if (!__ENV.REAXIUM_API_USER || !__ENV.REAXIUM_API_PASSWORD) throw new Error('API credentials required');
+if (!__ENV.CLOUD_USERNAME || !__ENV.CLOUD_PASSWORD) throw new Error('API credentials required');
 if (!__ENV.RUN_ID || !/^[a-zA-Z0-9-]{1,40}$/.test(__ENV.RUN_ID)) throw new Error('RUN_ID must be a unique 1-40 character alphanumeric/hyphen run identifier');
 const dateBase = Date.parse(__ENV.START_DATE || '');
 if (!Number.isFinite(dateBase)) throw new Error('Set START_DATE, for example 2026-10-22T08:00:00Z');
@@ -40,7 +40,7 @@ let expiresAt = 0;
 function authenticate() {
   if (Date.now() < expiresAt) return;
   const res = http.post(`${base.replace(/\/school_bus_cloud$/, '')}/api/auth/token`, JSON.stringify({
-    username: __ENV.REAXIUM_API_USER, password: __ENV.REAXIUM_API_PASSWORD,
+    username: __ENV.CLOUD_USERNAME, password: __ENV.CLOUD_PASSWORD,
   }), {headers: {'Content-Type': 'application/json'}, timeout: '30s', redirects: 0, tags: {name: 'auth/token'}});
   let token;
   try { token = res.json(); } catch (_) { exec.test.abort('Token endpoint returned invalid JSON'); }

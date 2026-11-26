@@ -17,8 +17,7 @@ class EnvTests(unittest.TestCase):
     def test_vault_configuration_preserves_raw_credentials_and_ignores_stale_env(self):
         secret = "fixture#pass$word'\\\""
         values = dict(SCHOOL_BUS_DATASOURCE_URL='jdbc:mysql://dev-db:3307/school_bus?useSSL=false',
-                      SCHOOL_BUS_DATASOURCE_USERNAME='vault-user', SCHOOL_BUS_DATASOURCE_PASSWORD=secret,
-                      REAXIUM_API_USER='api-user', REAXIUM_API_PASSWORD='api-password')
+                      SCHOOL_BUS_DATASOURCE_USERNAME='vault-user', SCHOOL_BUS_DATASOURCE_PASSWORD=secret)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory, 'runtime.json')
             path.write_text(json.dumps(values))

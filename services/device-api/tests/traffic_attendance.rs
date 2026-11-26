@@ -17,9 +17,7 @@ use tower::ServiceExt;
 async fn authentication_validation_and_unavailable_queue_keep_response_contract() {
     let app = router(Metrics::new().unwrap()).layer(Extension(Arc::new(Config {
         jwt_secret: "test-signing-secret-at-least-32-bytes".into(),
-        username: "test".into(),
-        password: "secret".into(),
-        previous_password: String::new(),
+        dispatcher_token: "test-dispatcher-token".into(),
         broadcast_enabled: false,
         broadcast_endpoint: String::new(),
         broadcast_timeout: Duration::from_secs(1),
@@ -105,9 +103,7 @@ async fn queued_events_are_inserted_without_deduplication() {
         .layer(Extension(publisher))
         .layer(Extension(Arc::new(Config {
             jwt_secret: "test-signing-secret-at-least-32-bytes".into(),
-            username: "test".into(),
-            password: "secret".into(),
-            previous_password: String::new(),
+            dispatcher_token: "test-dispatcher-token".into(),
             broadcast_enabled: false,
             broadcast_endpoint: String::new(),
             broadcast_timeout: Duration::from_secs(1),

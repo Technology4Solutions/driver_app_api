@@ -64,7 +64,7 @@ pub(crate) async fn send(config: &super::Config, content: &Value) -> Result<(), 
         .user_agent("DeviceApiWebSocketClient/1.0")
         .build()?
         .post(&config.broadcast_endpoint)
-        .basic_auth(&config.username, Some(&config.password))
+        .bearer_auth(&config.dispatcher_token)
         .json(&json!({"ReaxiumParameters":{"WebSocketPusher":{"content":content}}}))
         .send()
         .await?
@@ -87,7 +87,7 @@ mod tests {
     use std::time::Duration;
 
     #[tokio::test]
-    async fn http_dispatch_uses_shared_credentials_and_checks_gateway_result() {
+    async fn http_dispatch_uses_bearer_token_and_checks_gateway_result() {
         for (status, body, succeeds) in [
             (StatusCode::OK, json!({"ReaxiumResponse":{"code":0}}), true),
             (StatusCode::OK, json!({"ReaxiumResponse":{"code":3}}), false),
@@ -108,9 +108,7 @@ mod tests {
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let config = super::super::Config {
                 jwt_secret: "test-signing-secret-at-least-32-bytes".into(),
-                username: "api".into(),
-                password: "password".into(),
-                previous_password: String::new(),
+                dispatcher_token: "test-dispatcher-token".into(),
                 broadcast_enabled: true,
                 broadcast_endpoint: format!("http://{}/dispatch", listener.local_addr().unwrap()),
                 broadcast_timeout: Duration::from_secs(5),
@@ -121,7 +119,7 @@ mod tests {
             let content = json!({"device_id":935,"traffic_label":"ROUTE_MAJOR_TRAFFIC"});
             assert_eq!(send(&config, &content).await.is_ok(), succeeds);
             let (headers, request) = receiver.recv().await.unwrap();
-            assert_eq!(headers["authorization"], "Basic YXBpOnBhc3N3b3Jk");
+            assert_eq!(headers["authorization"], "Bearer test-dispatcher-token");
             assert_eq!(
                 request,
                 json!({"ReaxiumParameters":{"WebSocketPusher":{"content":content}}})

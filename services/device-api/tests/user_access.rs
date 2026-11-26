@@ -26,9 +26,7 @@ fn app(pool: MySqlPool, endpoint: &str, enabled: bool) -> Router {
         .layer(Extension(pool))
         .layer(Extension(Arc::new(Config {
             jwt_secret: "test-signing-secret-at-least-32-bytes".into(),
-            username: "test".into(),
-            password: "test-password".into(),
-            previous_password: "previous".into(),
+            dispatcher_token: "test-dispatcher-token".into(),
             broadcast_enabled: enabled,
             broadcast_endpoint: endpoint.into(),
             broadcast_timeout: Duration::from_millis(300),

@@ -35,9 +35,7 @@ fn make_app(pool: MySqlPool, endpoint: &str, udp: Option<SocketAddr>) -> Router 
         .layer(Extension(pool))
         .layer(Extension(Arc::new(Config {
             jwt_secret: "test-signing-secret-at-least-32-bytes".into(),
-            username: "test".into(),
-            password: "test-password".into(),
-            previous_password: "previous".into(),
+            dispatcher_token: "test-dispatcher-token".into(),
             broadcast_enabled: true,
             broadcast_endpoint: endpoint.into(),
             broadcast_timeout: Duration::from_millis(300),
@@ -528,9 +526,7 @@ async fn saves_broadcasts_sends_udp_and_reports_rollback_and_partial_failure() {
         .layer(Extension(pool.clone()))
         .layer(Extension(Arc::new(Config {
             jwt_secret: "test-signing-secret-at-least-32-bytes".into(),
-            username: "test".into(),
-            password: "test-password".into(),
-            previous_password: String::new(),
+            dispatcher_token: "test-dispatcher-token".into(),
             broadcast_enabled: false,
             broadcast_endpoint: "http://127.0.0.1:1".into(),
             broadcast_timeout: Duration::from_millis(300),
@@ -1190,9 +1186,7 @@ async fn alarm_notifications_save_optional_alerts_and_broadcast() {
         .layer(Extension(pool.clone()))
         .layer(Extension(Arc::new(Config {
             jwt_secret: "test-signing-secret-at-least-32-bytes".into(),
-            username: "test".into(),
-            password: "test-password".into(),
-            previous_password: String::new(),
+            dispatcher_token: "test-dispatcher-token".into(),
             broadcast_enabled: false,
             broadcast_endpoint: "http://127.0.0.1:1".into(),
             broadcast_timeout: Duration::from_millis(300),

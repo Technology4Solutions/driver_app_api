@@ -34,9 +34,9 @@ def kv_version(addr, mount, token, configured='auto'):
 def configuration(environ, bundle, mode):
     result = dict(environ)
     # Export only application configuration, never arbitrary executable/shell settings.
-    allowed = ('DB_', 'REAXIUM_API_', 'DEVICE_STATUS_', 'DEVICE_ACCESS_', 'DEVICE_ATTENDANCE_', 'TRAFFIC_ATTENDANCE_', 'VISION_')
+    allowed = ('DB_', 'DEVICE_STATUS_', 'DEVICE_ACCESS_', 'DEVICE_ATTENDANCE_', 'TRAFFIC_ATTENDANCE_', 'VISION_')
     exact = {'BROADCAST_ENABLED', 'DASHBOARD_BROADCAST_ENABLED', 'DEVICES_API_EXPORT_DEVICE_STATUS_URL',
-             'RABBITMQ_URL', 'REDIS_URL', 'LOG_LEVEL'}
+             'RABBITMQ_URL', 'REDIS_URL', 'LOG_LEVEL', 'DISPATCHER_BEARER_TOKEN', 'REAXIUM_API_JWT_SECRET'}
     for key, value in bundle.items():
         if value is not None and (key.startswith(allowed) or key in exact):
             result[key] = str(value).lower() if isinstance(value, bool) else str(value)
@@ -66,7 +66,7 @@ def configuration(environ, bundle, mode):
         value = result[key]
         if not value.isascii() or not value.isdecimal() or not 0 < int(value) <= maximum:
             raise ConfigurationError(f'{key} must be a positive integer within its supported range')
-    for key in ['DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASSWORD', 'REAXIUM_API_USER', 'REAXIUM_API_PASSWORD']:
+    for key in ['DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASSWORD']:
         if not result.get(key):
             raise ConfigurationError(f'Missing application setting: {key}')
     if len(result.get('REAXIUM_API_JWT_SECRET', '').encode()) < 32:
@@ -79,7 +79,7 @@ def configuration(environ, bundle, mode):
     result['APP_ENV'] = environ['ENVIRONMENT'].lower()
     result.setdefault('BROADCAST_ENABLED', 'true')
     if result['BROADCAST_ENABLED'] == 'true':
-        for key in ['DEVICES_API_EXPORT_DEVICE_STATUS_URL', 'REAXIUM_API_USER', 'REAXIUM_API_PASSWORD']:
+        for key in ['DEVICES_API_EXPORT_DEVICE_STATUS_URL', 'DISPATCHER_BEARER_TOKEN']:
             if not result.get(key):
                 raise ConfigurationError(f'Missing enabled broadcast setting: {key}')
     return result

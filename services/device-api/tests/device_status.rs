@@ -3,7 +3,6 @@ mod jwt;
 use jwt::support_token;
 
 use axum::{body::Body, http::Request, Extension, Router};
-use base64::{engine::general_purpose::STANDARD, Engine};
 use device_api::{device_status::Config, router, telemetry::Metrics};
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
@@ -14,9 +13,7 @@ use tower::ServiceExt;
 fn config(endpoint: &str) -> Config {
     Config {
         jwt_secret: "test-signing-secret-at-least-32-bytes".into(),
-        username: "api-user".into(),
-        password: "api:password".into(),
-        previous_password: "old-password".into(),
+        dispatcher_token: "test-dispatcher-token".into(),
         broadcast_enabled: true,
         broadcast_endpoint: endpoint.into(),
         broadcast_timeout: Duration::from_secs(2),
@@ -69,9 +66,7 @@ async fn authentication_fails_closed_before_database_access() {
         );
     }
     let mut empty = config("tcp://127.0.0.1:1");
-    empty.username.clear();
-    empty.password.clear();
-    empty.previous_password.clear();
+    empty.jwt_secret.clear();
     let body = post(app(lazy_pool(), empty), Some(&authorization("")), "{}").await;
     assert_eq!(body["ReaxiumResponse"]["message"], "Invalid Authentication");
 }
@@ -211,8 +206,7 @@ async fn queues_filters_persists_and_broadcasts_like_java() {
         "DEVICES_API_EXPORT_DEVICE_STATUS_URL",
         format!("http://{}/dispatch", listener.local_addr().unwrap()),
     );
-    std::env::set_var("REAXIUM_API_USER", "broadcast-user");
-    std::env::set_var("REAXIUM_API_PASSWORD", "broadcast-pass");
+    std::env::set_var("DISPATCHER_BEARER_TOKEN", "test-dispatcher-token");
     let server = tokio::spawn(async move {
         axum::serve(listener, http).await.unwrap();
     });
@@ -260,7 +254,7 @@ async fn queues_filters_persists_and_broadcasts_like_java() {
         .unwrap();
     assert_eq!(
         headers["authorization"],
-        format!("Basic {}", STANDARD.encode("broadcast-user:broadcast-pass"))
+        "Bearer test-dispatcher-token"
     );
     let content = &body["ReaxiumParameters"]["WebSocketPusher"]["content"];
     assert_eq!(content["gps_serial"], "registered-device");

@@ -26,15 +26,12 @@ def load_runtime_config(path):
     try:
         values = json.loads(path.read_text())
         keys = ('SCHOOL_BUS_DATASOURCE_URL', 'SCHOOL_BUS_DATASOURCE_USERNAME',
-                'SCHOOL_BUS_DATASOURCE_PASSWORD', 'REAXIUM_API_USER', 'REAXIUM_API_PASSWORD')
+                'SCHOOL_BUS_DATASOURCE_PASSWORD')
         if not isinstance(values, dict) or any(not isinstance(values.get(key), str) or not values[key] for key in keys):
             raise ValueError()
         # Only use the explicitly provisioned shared keys, never ambient DB_*.
         result = database_settings({key: values[key] for key in keys})
-        result.update(REAXIUM_API_USER=values['REAXIUM_API_USER'],
-                      REAXIUM_API_PASSWORD=values['REAXIUM_API_PASSWORD'])
         return result
     except (ValueError, TypeError):
         raise ValueError('Invalid Vault runner configuration; require SCHOOL_BUS_DATASOURCE_URL, '
-                         'SCHOOL_BUS_DATASOURCE_USERNAME, SCHOOL_BUS_DATASOURCE_PASSWORD, '
-                         'REAXIUM_API_USER and REAXIUM_API_PASSWORD') from None
+                         'SCHOOL_BUS_DATASOURCE_USERNAME, SCHOOL_BUS_DATASOURCE_PASSWORD') from None

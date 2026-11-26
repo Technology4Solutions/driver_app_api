@@ -1,6 +1,5 @@
 'use strict';
 const $ = id => document.getElementById(id);
-let configuredCredentials = false;
 let services = {};
 let token, ready = false, busy = false, submitting = false;
 const settingsKey = 'driver-load-test-settings-v1';
@@ -112,10 +111,10 @@ $('form').addEventListener('submit',async event=>{
   event.preventDefault();submitting=true;buttons();$('error').textContent='';
   try {
     let date=$('date').value; if(date.length===16) date+=':00';
-    render(await request('/api/start',{service:$('service').value,vus:Number($('vus').value),journeys:Number($('journeys').value),duration:$('duration').value,date:date+'Z',username:configuredCredentials ? '' : $('username').value,password:configuredCredentials ? '' : $('password').value,acknowledge:$('acknowledge').checked}));
+    render(await request('/api/start',{service:$('service').value,vus:Number($('vus').value),journeys:Number($('journeys').value),duration:$('duration').value,date:date+'Z',username:$('username').value,password:$('password').value,acknowledge:$('acknowledge').checked}));
     $('password').value='';
   } catch(error){$('error').textContent=error.message;} finally{submitting=false;buttons();}
 });
 $('stop').addEventListener('click',async()=>{submitting=true;buttons();try{await request('/api/stop');$('status').textContent='Stopping…';}catch(error){$('error').textContent=error.message;}finally{submitting=false;buttons();}});
 async function poll(){try{render(await request('/api/state'));ready=true;buttons();}catch(error){ready=false;buttons();$('status').textContent='Disconnected';}setTimeout(poll,1500);}
-(async()=>{try{const config=await request('/api/config');populateServices(config.services);token=config.token;configuredCredentials=config.credentials_configured;if(configuredCredentials){$('credentials').hidden=true;$('credential-note').hidden=false;$('username').required=false;$('password').required=false;}$('target').textContent=`${config.api_url} · ${config.devices} devices in ${config.dataset}`;$('vus').max=config.devices;restoreSettings();ready=true;buttons();poll();}catch(error){$('error').textContent=error.message;}})();
+(async()=>{try{const config=await request('/api/config');populateServices(config.services);token=config.token;$('target').textContent=`${config.api_url} · ${config.devices} devices in ${config.dataset}`;$('vus').max=config.devices;restoreSettings();ready=true;buttons();poll();}catch(error){$('error').textContent=error.message;}})();

@@ -59,9 +59,7 @@ node {
                         [path: "kv/reaxium_ci/device_api/${client}_${target}", engineVersion: 2, secretValues: [
                             [envVar: 'K6_DB_URL', vaultKey: 'SCHOOL_BUS_DATASOURCE_URL'],
                             [envVar: 'K6_DB_USER', vaultKey: 'SCHOOL_BUS_DATASOURCE_USERNAME'],
-                            [envVar: 'K6_DB_PASSWORD', vaultKey: 'SCHOOL_BUS_DATASOURCE_PASSWORD'],
-                            [envVar: 'K6_API_USER', vaultKey: 'REAXIUM_API_USER'],
-                            [envVar: 'K6_API_PASSWORD', vaultKey: 'REAXIUM_API_PASSWORD']]]
+                            [envVar: 'K6_DB_PASSWORD', vaultKey: 'SCHOOL_BUS_DATASOURCE_PASSWORD']]]
                     ]) {
                         // A dedicated browser login; never reuse the API or Vault token.
                         withCredentials([string(credentialsId: 'k6-web-access-token', variable: 'K6_WEB_TOKEN')]) {
@@ -72,9 +70,7 @@ node {
                                 writeFile file: runtimeFile, text: groovy.json.JsonOutput.toJson([
                                     SCHOOL_BUS_DATASOURCE_URL: env.K6_DB_URL,
                                     SCHOOL_BUS_DATASOURCE_USERNAME: env.K6_DB_USER,
-                                    SCHOOL_BUS_DATASOURCE_PASSWORD: env.K6_DB_PASSWORD,
-                                    REAXIUM_API_USER: env.K6_API_USER,
-                                    REAXIUM_API_PASSWORD: env.K6_API_PASSWORD
+                                    SCHOOL_BUS_DATASOURCE_PASSWORD: env.K6_DB_PASSWORD
                                 ])
                                 withEnv(["K6_CONFIG_FILE=${runtimeFile}"]) { sh 'chmod 600 "$K6_CONFIG_FILE"' }
                                 withEnv(["K6_TOKEN_FILE=${tokenFile}"]) { sh 'chmod 600 "$K6_TOKEN_FILE"' }

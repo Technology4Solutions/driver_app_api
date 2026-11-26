@@ -3,8 +3,8 @@ set -euo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 [[ $# == 1 && -f "$1" ]] || { echo "Usage: $0 DATASET.json" >&2; exit 2; }
 : "${API_BASE_URL:?Set API_BASE_URL to your isolated test API}"
-: "${REAXIUM_API_USER:?Set REAXIUM_API_USER}"
-: "${REAXIUM_API_PASSWORD:?Set REAXIUM_API_PASSWORD}"
+: "${CLOUD_USERNAME:?Set CLOUD_USERNAME}"
+: "${CLOUD_PASSWORD:?Set CLOUD_PASSWORD}"
 : "${START_DATE:?Set START_DATE, e.g. 2026-10-22T08:00:00Z}"
 device_count="$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' "$1")"
 export VUS="${VUS:-$device_count}" JOURNEYS="${JOURNEYS:-10}" MAX_DURATION="${MAX_DURATION:-30m}"
@@ -28,7 +28,7 @@ dataset="$preparation_dir/devices.json"
 echo "Run $RUN_ID: $VUS devices, $JOURNEYS iterations each, service=$SERVICE; writes to $API_BASE_URL."
 test_exit=0
 docker run --rm --network host --user "$(id -u):$(id -g)" \
-  -e API_BASE_URL -e REAXIUM_API_USER -e REAXIUM_API_PASSWORD \
+  -e API_BASE_URL -e CLOUD_USERNAME -e CLOUD_PASSWORD \
   -e SERVICE -e VUS -e JOURNEYS -e MAX_DURATION -e RUN_ID -e START_DATE \
   --mount "type=bind,src=$script_dir,dst=/scripts,readonly" \
   --mount "type=bind,src=$dataset,dst=/data/devices.json,readonly" \

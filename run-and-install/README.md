@@ -8,7 +8,7 @@ Bash, curl, and Python 3. Rust is provided by Docker.
 
 ```bash
 ./run-and-install/build.sh
-# Edit .env with your database and shared API credentials.
+# Edit .env with your database settings, JWT signing secret, and dispatcher bearer token.
 ./run-and-install/run.sh
 ./run-and-install/logs.sh
 # Stop the local services when finished:
@@ -96,9 +96,9 @@ cp run-and-install/device-status.example.json run-and-install/device-status.loca
 ./run-and-install/test-api.sh --device-status run-and-install/device-status.local.json
 ```
 
-Enter the same API username and password configured in `.env`. The password prompt
-is hidden. Alternatively, the script accepts already-exported `REAXIUM_API_USER`
-and `REAXIUM_API_PASSWORD` (or their `REAXIUM_API_BASIC_AUTH_*` aliases).
+Enter the username and password of an active Cloud database account. The password prompt
+is hidden. Alternatively, the script accepts already-exported `CLOUD_USERNAME`
+and `CLOUD_PASSWORD`.
 It deliberately does not execute `.env` as shell code.
 
 **The DeviceStatus test queues an update that can write to the configured database and broadcast to dashboards.**
@@ -147,8 +147,7 @@ then run:
 
 This writes `device_traffic` and `device_activity` and sends Vision/dashboard updates.
 Configure `VISION_UDP_DESTINATION` and `VISION_TIMEZONE` in `.env`; the dashboard
-uses `DEVICES_API_EXPORT_DEVICE_STATUS_URL` with `REAXIUM_API_USER` and
-`REAXIUM_API_PASSWORD`. The script checks the response envelope, not just
+uses `DEVICES_API_EXPORT_DEVICE_STATUS_URL` with `DISPATCHER_BEARER_TOKEN`. The script checks the response envelope, not just
 HTTP 200. If the response says `database_saved: true`, do not resubmit the route start.
 
 To finish a route, use `--end-route json/end-route.example.json` (from this directory),

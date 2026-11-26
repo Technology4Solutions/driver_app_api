@@ -9,8 +9,7 @@ pub(crate) struct Broadcaster {
     pub enabled: bool,
     client: reqwest::Client,
     url: String,
-    username: String,
-    password: String,
+    token: String,
 }
 impl Broadcaster {
     pub fn from_env() -> Result<Self, Error> {
@@ -21,10 +20,9 @@ impl Broadcaster {
             .unwrap_or_else(|| (!local).to_string())
             .parse()?;
         let url = env::var("DEVICES_API_EXPORT_DEVICE_STATUS_URL").unwrap_or_default();
-        let username = env::var("REAXIUM_API_USER").unwrap_or_default();
-        let password = env::var("REAXIUM_API_PASSWORD").unwrap_or_default();
-        if enabled && (url.is_empty() || username.is_empty() || password.is_empty()) {
-            return Err("enabled status broadcasts require URL, username and password".into());
+        let token = env::var("DISPATCHER_BEARER_TOKEN").unwrap_or_default();
+        if enabled && (url.is_empty() || token.trim().is_empty()) {
+            return Err("enabled status broadcasts require URL and DISPATCHER_BEARER_TOKEN".into());
         }
         if enabled {
             reqwest::Url::parse(&url)?;
@@ -37,15 +35,14 @@ impl Broadcaster {
                 .user_agent("DeviceApiWebSocketClient/1.0")
                 .build()?,
             url,
-            username,
-            password,
+            token,
         })
     }
     pub async fn send(&self, content: Value) {
         let result = self
             .client
             .post(&self.url)
-            .basic_auth(&self.username, Some(&self.password))
+            .bearer_auth(&self.token)
             .json(&json!({"ReaxiumParameters":{"WebSocketPusher":{"content":content}}}))
             .send()
             .await

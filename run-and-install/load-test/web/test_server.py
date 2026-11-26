@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 from types import SimpleNamespace
 
-from server import Runner, make_handler, load_credentials, SERVICES
+from server import Runner, make_handler, SERVICES
 
 
 class Connection:
@@ -110,43 +110,32 @@ class Tests(unittest.TestCase):
         self.assertNotIn('test-password', state['logs'])
         self.assertEqual(commands[-1][1:3], ['rm', '-f'])
 
-    def test_env_credentials_used_without_browser_values(self):
+    def test_credentials_are_entered_for_each_run(self):
         env_file = Path(self.temp.name, '.env')
-        env_file.write_text("export REAXIUM_API_USER='fixture user'\nREAXIUM_API_PASSWORD='fixture#password' # comment\n")
-        with patch.dict('os.environ', {}, clear=True):
-            runner = Runner(self.runner.dataset, self.runner.api_url, env_file)
-        self.assertTrue(runner.credentials_ready())
+        env_file.write_text("CLOUD_USERNAME=ignored\nCLOUD_PASSWORD=ignored\n")
+        runner = Runner(self.runner.dataset, self.runner.api_url, env_file)
         data = dict(self.data)
-        del data['username']
         del data['password']
-        with patch.object(runner, 'execute') as execute:
+        with self.assertRaises(ValueError):
             runner.start(data)
+        with patch.object(runner, 'execute') as execute:
+            runner.start(self.data)
             runner.thread.join(3)
-        env = execute.call_args.args[0]
-        self.assertEqual(env['REAXIUM_API_USER'], 'fixture user')
-        self.assertEqual(env['REAXIUM_API_PASSWORD'], 'fixture#password')
-        self.runner = runner
-        response = self.request()
-        self.assertIn(b'"credentials_configured": true', response)
-        self.assertNotIn(b'fixture', response)
-        self.assertNotIn('fixture', json.dumps(runner.snapshot()))
-        with patch.dict('os.environ', {'REAXIUM_API_USER': 'override'}, clear=True):
-            self.assertEqual(load_credentials(env_file)['REAXIUM_API_USER'], 'override')
+        self.assertEqual(execute.call_args.args[0]['CLOUD_PASSWORD'], self.data['password'])
 
     def test_vault_config_reaches_preparation_without_dotenv_or_secret_arguments(self):
         config = Path(self.temp.name, 'runtime-config.json')
         config.write_text(json.dumps(dict(
             SCHOOL_BUS_DATASOURCE_URL='jdbc:mysql://dev-db:3306/school',
             SCHOOL_BUS_DATASOURCE_USERNAME='vault-user',
-            SCHOOL_BUS_DATASOURCE_PASSWORD="fixture#password$with'quotes",
-            REAXIUM_API_USER='vault-api-user', REAXIUM_API_PASSWORD='vault-api-password')))
+            SCHOOL_BUS_DATASOURCE_PASSWORD="fixture#password$with'quotes")))
         self.runner = Runner(self.runner.dataset, self.runner.api_url,
                              Path(self.temp.name, 'nonexistent.env'), config)
         with patch.object(self.runner, 'execute') as execute:
             self.runner.start(self.data)
             self.runner.thread.join(3)
         env = execute.call_args.args[0]
-        self.assertEqual(env['REAXIUM_API_USER'], 'vault-api-user')
+        self.assertEqual(env['CLOUD_USERNAME'], self.data['username'])
         self.assertNotIn('DB_PASSWORD', env)
         with patch('server.subprocess.run', return_value=SimpleNamespace(returncode=0, stdout='', stderr='')) as run:
             self.runner.prepare(env, Path(self.temp.name, 'prepared.json'), lambda line: None)
@@ -219,7 +208,7 @@ class Tests(unittest.TestCase):
         token = Path(self.temp.name, 'token')
         token.write_text('test-browser-token-long-enough')
         env_file = Path(self.temp.name, '.env')
-        env_file.write_text('REAXIUM_API_USER=test-user\nREAXIUM_API_PASSWORD=test-password\n')
+        env_file.write_text('CLOUD_USERNAME=test-user\nCLOUD_PASSWORD=test-password\n')
         command = [sys.executable, str(Path(__file__).with_name('server.py')),
                    '--check-config', '--bind', '0.0.0.0', '--public-host', 'dev.example',
                    '--dataset', str(self.runner.dataset), '--env-file', str(env_file),

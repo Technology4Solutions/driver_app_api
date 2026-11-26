@@ -20,9 +20,9 @@ the deployment defaults use Swarm service names.
 2. Replace the database identity/password at the database authority, retain only
    required grants, update Vault DB_* or SCHOOL_BUS_DATASOURCE_* keys, redeploy
    consumers, verify access, and revoke the old database identity/password.
-3. Replace API username and password in Vault and every API client/broadcast
-   consumer. Remove REAXIUM_API_PASSWORD_PREVIOUS and any basic-auth aliases
-   that retain exposed credentials. Restart all replicas; reject old credentials.
+3. Rotate compromised Cloud account passwords in the database and update clients.
+   Revoke exposed dispatcher tokens, provision a new DISPATCHER_BEARER_TOKEN,
+   and restart broadcast consumers.
 4. Generate a new JWT signing secret with at least 32 random bytes directly into
    Vault using an approved secret workflow. Restart all replicas and require
    clients to authenticate again. Verify previously issued JWTs are rejected.

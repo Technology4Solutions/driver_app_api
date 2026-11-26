@@ -9,7 +9,6 @@ from pathlib import Path
 import re
 import hmac
 import binascii
-import shlex
 import subprocess
 import tempfile
 import threading
@@ -33,23 +32,6 @@ def token_urlsafe(size):
     return base64.urlsafe_b64encode(os.urandom(size)).rstrip(b'=').decode('ascii')
 
 
-def load_credentials(path):
-    keys = ('REAXIUM_API_USER', 'REAXIUM_API_PASSWORD')
-    values = {}
-    if path is not None and Path(path).exists():
-        for line in Path(path).read_text().splitlines():
-            key, separator, value = line.partition('=')
-            key = key.strip()
-            if key.startswith('export '):
-                key = key[len('export '):]
-            if separator and key in keys:
-                try:
-                    values[key] = ' '.join(shlex.split(value, comments=True))
-                except ValueError:
-                    raise ValueError('Invalid quoting for ' + key + ' in .env') from None
-    return {key: os.environ.get(key) or values.get(key, '') for key in keys}
-
-
 class Runner:
     def __init__(self, dataset, api_url, env_file=None, config_file=None):
         self.dataset = Path(dataset).resolve()
@@ -61,15 +43,10 @@ class Runner:
         self.env_file = Path(env_file) if env_file is not None else ROOT.parents[2] / '.env'
         self.config_file = Path(config_file).resolve() if config_file is not None else None
         self.runtime_config = load_runtime_config(self.config_file) if self.config_file else {}
-        self.credentials = ({key: self.runtime_config[key] for key in ('REAXIUM_API_USER', 'REAXIUM_API_PASSWORD')}
-                            if self.config_file else load_credentials(env_file) if env_file is not None else {})
         self.lock = threading.RLock()
         self.state = {'status': 'idle', 'logs': '', 'summary': None}
         self.cancel = threading.Event()
         self.thread = None
-
-    def credentials_ready(self):
-        return bool(self.credentials.get('REAXIUM_API_USER') and self.credentials.get('REAXIUM_API_PASSWORD'))
 
     def snapshot(self):
         with self.lock:
@@ -77,9 +54,6 @@ class Runner:
 
     def start(self, data):
         data = dict(data)
-        if self.credentials_ready():
-            data['username'] = self.credentials['REAXIUM_API_USER']
-            data['password'] = self.credentials['REAXIUM_API_PASSWORD']
         service = data.get('service')
         if service not in SERVICES:
             raise ValueError('Choose a valid service')
@@ -109,7 +83,7 @@ class Runner:
             self.state = {'status': 'preparing', 'id': run_id, 'logs': '', 'summary': None, 'exit_code': None}
             env = dict(os.environ, API_BASE_URL=self.api_url, SERVICE=service, VUS=str(vus),
                        JOURNEYS=str(journeys), MAX_DURATION=duration, START_DATE=date, RUN_ID=run_id,
-                       REAXIUM_API_USER=data['username'], REAXIUM_API_PASSWORD=data['password'])
+                       CLOUD_USERNAME=data['username'], CLOUD_PASSWORD=data['password'])
             self.thread = threading.Thread(target=self.execute, args=(env,), daemon=True)
             self.thread.start()
 
@@ -139,8 +113,8 @@ class Runner:
 
     def execute(self, env):
         name = 'driver-k6-web-' + env['RUN_ID']
-        secret_values = [env['REAXIUM_API_PASSWORD'], env['REAXIUM_API_USER'],
-                         base64.b64encode((env['REAXIUM_API_USER'] + ':' + env['REAXIUM_API_PASSWORD']).encode()).decode()]
+        secret_values = [env['CLOUD_PASSWORD'], env['CLOUD_USERNAME'],
+                         base64.b64encode((env['CLOUD_USERNAME'] + ':' + env['CLOUD_PASSWORD']).encode()).decode()]
         if self.config_file:
             secret_values.extend(self.runtime_config[key] for key in ('DB_PASSWORD', 'DB_USER'))
 
@@ -159,7 +133,7 @@ class Runner:
                 with self.lock:
                     self.state['status'] = 'starting'
                 command = ['docker', 'create', '--name', name, '--network', 'host', '--user', '%s:%s' % (os.getuid(), os.getgid())]
-                for key in ('API_BASE_URL', 'SERVICE', 'VUS', 'JOURNEYS', 'MAX_DURATION', 'START_DATE', 'RUN_ID', 'REAXIUM_API_USER', 'REAXIUM_API_PASSWORD'):
+                for key in ('API_BASE_URL', 'SERVICE', 'VUS', 'JOURNEYS', 'MAX_DURATION', 'START_DATE', 'RUN_ID', 'CLOUD_USERNAME', 'CLOUD_PASSWORD'):
                     command += ['-e', key]
                 command += ['--mount', 'type=bind,src=%s,dst=/scripts,readonly' % ROOT.parent,
                             '--mount', 'type=bind,src=%s,dst=/data/devices.json,readonly' % dataset,
@@ -251,7 +225,7 @@ def make_handler(runner, token, public_host=None, access_token=None, public_orig
             if self.path == '/api/state':
                 return self.reply(200, runner.snapshot())
             if self.path == '/api/config':
-                return self.reply(200, {'token': token, 'devices': runner.count, 'api_url': runner.api_url, 'dataset': runner.dataset.name, 'credentials_configured': runner.credentials_ready(), 'services': SERVICES})
+                return self.reply(200, {'token': token, 'devices': runner.count, 'api_url': runner.api_url, 'dataset': runner.dataset.name, 'services': SERVICES})
             files = {'/': ('index.html', 'text/html; charset=utf-8'), '/app.js': ('app.js', 'text/javascript'), '/style.css': ('style.css', 'text/css'), '/reaxium-dismissal-logo.png': ('reaxium-dismissal-logo.png', 'image/png')}
             if self.path not in files:
                 return self.reply(404, {'error': 'Not found'})

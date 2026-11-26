@@ -48,7 +48,7 @@ try:
     with tempfile.TemporaryDirectory() as folder:
         fixture = Path(folder) / 'devices.json'
         fixture.write_text(json.dumps([dict(attendance_user_id=10,attendance_activity_id=1,attendance_place_id=1,attendance_access_type=3,attendance_device_type=21,attendance_traffic_type=1,device_id=i,device_imei=f'mock-imei-{i}',business_id=1,route_id=1,route_ids='1,2',passenger_id=i*10,access_type=3,passengers=[dict(passenger_id=i*10+j,access_type=3) for j in range(2)],driver_id=1,bus_info='1',start_stop_id=1,end_stop_id=2,start_latitude=27,start_longitude=-80,end_latitude=27,end_longitude=-80) for i in [1,2]]))
-        env = dict(os.environ, LOAD_TEST_OFFLINE='1', API_BASE_URL=f'http://127.0.0.1:{server.server_port}',REAXIUM_API_USER='mock-user',REAXIUM_API_PASSWORD='mock-password',START_DATE='2026-10-22T08:00:00Z',VUS='2',JOURNEYS='2',MAX_DURATION='30s', SERVICE='journey')
+        env = dict(os.environ, LOAD_TEST_OFFLINE='1', API_BASE_URL=f'http://127.0.0.1:{server.server_port}',CLOUD_USERNAME='mock-user',CLOUD_PASSWORD='mock-password',START_DATE='2026-10-22T08:00:00Z',VUS='2',JOURNEYS='2',MAX_DURATION='30s', SERVICE='journey')
         for test_mode in ['success', 'partial', 'failure']:
             mode = test_mode
             records.clear()

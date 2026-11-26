@@ -47,10 +47,10 @@ class ConfigurationTests(unittest.TestCase):
 
     def test_missing_credentials_report_only_the_setting_name(self):
         bundle = self.bundle()
-        del bundle['REAXIUM_API_USER']
+        del bundle['SCHOOL_BUS_DATASOURCE_USERNAME']
         with self.assertRaises(module.ConfigurationError) as error:
             module.configuration({'ENVIRONMENT': 'DEV'}, bundle, 'api')
-        self.assertEqual(str(error.exception), 'Missing application setting: REAXIUM_API_USER')
+        self.assertEqual(str(error.exception), 'Missing Vault key: SCHOOL_BUS_DATASOURCE_USERNAME')
 
     def test_jwt_secret_required(self):
         for secret in ('', 'short'):
@@ -80,7 +80,7 @@ class ConfigurationTests(unittest.TestCase):
     def bundle(self):
         return dict(SCHOOL_BUS_DATASOURCE_URL='jdbc:mysql://db:3307/school_bus?useSSL=false',
                     SCHOOL_BUS_DATASOURCE_USERNAME='test', SCHOOL_BUS_DATASOURCE_PASSWORD='test',
-                    REAXIUM_API_USER='api', REAXIUM_API_PASSWORD='test',
+                    DISPATCHER_BEARER_TOKEN='test-dispatcher-token',
                     REAXIUM_API_JWT_SECRET='test-signing-secret-at-least-32-bytes',
                     RABBITMQ_USER='a@b', RABBITMQ_PASSWORD='a/b:c', BROADCAST_ENABLED=False)
 
@@ -122,8 +122,10 @@ class ConfigurationTests(unittest.TestCase):
         bundle['DEVICES_API_EXPORT_DEVICE_STATUS_URL'] = 'https://backend.test/WebSocketPusher/dispatch'
         result = module.configuration({'ENVIRONMENT': 'DEV'}, bundle, 'api')
         self.assertEqual(result['BROADCAST_ENABLED'], 'true')
-        self.assertEqual(result['REAXIUM_API_USER'], 'api')
-        self.assertEqual(result['REAXIUM_API_PASSWORD'], 'test')
+        self.assertEqual(result['DISPATCHER_BEARER_TOKEN'], 'test-dispatcher-token')
+        del bundle['DISPATCHER_BEARER_TOKEN']
+        with self.assertRaisesRegex(module.ConfigurationError, 'DISPATCHER_BEARER_TOKEN'):
+            module.configuration({'ENVIRONMENT': 'DEV'}, bundle, 'api')
 
     def test_rejects_missing_broker_secret_and_ignores_executable_settings(self):
         bundle = self.bundle()

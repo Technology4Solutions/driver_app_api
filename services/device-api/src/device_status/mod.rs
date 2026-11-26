@@ -10,15 +10,12 @@ use axum::{extract::rejection::JsonRejection, http::HeaderMap, Extension, Json};
 pub use model::Update;
 use serde_json::{json, Value};
 use std::{env, sync::Arc, time::Duration};
-use subtle::ConstantTimeEq;
 
-/// Shared API credentials, using the same names and rotation aliases as ReaxiumCloud.
+/// JWT signing and outbound broadcast configuration.
 #[derive(Clone)]
 pub struct Config {
     pub jwt_secret: String,
-    pub username: String,
-    pub password: String,
-    pub previous_password: String,
+    pub dispatcher_token: String,
     pub broadcast_enabled: bool,
     pub broadcast_endpoint: String,
     pub broadcast_timeout: Duration,
@@ -26,13 +23,6 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        fn first(names: &[&str]) -> String {
-            names
-                .iter()
-                .filter_map(|n| env::var(n).ok())
-                .find(|s| !s.is_empty())
-                .unwrap_or_default()
-        }
         let timeout: u64 = env::var("DEVICE_STATUS_BROADCAST_TIMEOUT_SECONDS")
             .unwrap_or_else(|_| "5".into())
             .parse()?;
@@ -50,30 +40,27 @@ impl Config {
         if jwt_secret.len() < 32 {
             return Err("REAXIUM_API_JWT_SECRET must contain at least 32 bytes".into());
         }
+        let dispatcher_token = env::var("DISPATCHER_BEARER_TOKEN").unwrap_or_default();
+        let broadcast_endpoint =
+            env::var("DEVICES_API_EXPORT_DEVICE_STATUS_URL").unwrap_or_default();
+        if broadcast_enabled
+            && (dispatcher_token.trim().is_empty() || broadcast_endpoint.is_empty())
+        {
+            return Err(
+                "enabled dashboard broadcasts require URL and DISPATCHER_BEARER_TOKEN".into(),
+            );
+        }
         Ok(Self {
             jwt_secret,
             broadcast_enabled,
-            username: first(&["REAXIUM_API_USER", "REAXIUM_API_BASIC_AUTH_USERNAME"]),
-            password: first(&["REAXIUM_API_PASSWORD", "REAXIUM_API_BASIC_AUTH_PASSWORD"]),
-            previous_password: first(&["REAXIUM_API_PASSWORD_PREVIOUS"]),
-            broadcast_endpoint: env::var("DEVICES_API_EXPORT_DEVICE_STATUS_URL")
-                .unwrap_or_default(),
+            dispatcher_token,
+            broadcast_endpoint,
             broadcast_timeout: Duration::from_secs(timeout),
         })
     }
 
     pub(crate) fn authorized(&self, headers: &HeaderMap) -> bool {
         crate::auth::authorized(self, headers)
-    }
-
-    pub(crate) fn credentials_match(&self, user: &[u8], password: &[u8]) -> bool {
-        let user_matches =
-            !self.username.is_empty() & bool::from(user.ct_eq(self.username.as_bytes()));
-        let current =
-            !self.password.is_empty() & bool::from(password.ct_eq(self.password.as_bytes()));
-        let previous = !self.previous_password.is_empty()
-            & bool::from(password.ct_eq(self.previous_password.as_bytes()));
-        user_matches & (current | previous)
     }
 }
 

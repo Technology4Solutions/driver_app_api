@@ -80,7 +80,7 @@ JSON logs and Prometheus metrics are included. Alert notification delivery requi
 `POST /api/DeviceStatus/updateStatus` follows the Java `reaxium-device-api` queue workflow.
 The existing `/device/DeviceStatus/update` path is an alias. Both accept JSON in the
 `ReaxiumParameters.DeviceStatus` envelope and keep the shared JWT bearer authentication
-(`REAXIUM_API_USER` / `REAXIUM_API_PASSWORD`, with the existing rotation aliases).
+(Cloud database user credentials).
 
 The HTTP handler validates input and publishes a persistent RabbitMQ message with a publisher
 confirmation. It returns HTTP 200 once queued, before any database processing:
@@ -120,16 +120,17 @@ strict date/coordinate/required-field validation. Charging accepts Java boolean/
 Status broadcasts now use HTTP `WebSocketPusher/dispatch`, with the envelope
 `ReaxiumParameters.WebSocketPusher.content`, Java-style device/status/activity fields,
 device serial as `gps_serial`, passenger ID lists, and `last_associated_traffic=3`.
-The route stop join uses Java's `routes_stops_relationship` table. Dispatcher Basic auth uses the shared `REAXIUM_API_USER` and `REAXIUM_API_PASSWORD`
-credentials, which must match the receiving ReaxiumCloud API.
+The route stop join uses Java's `routes_stops_relationship` table. Dispatcher requests use `Authorization: Bearer <DISPATCHER_BEARER_TOKEN>`.
+Provision a valid token issued by the receiving ReaxiumCloud session service;
+the driver API JWT is separate and is not a Cloud session token. Rotate the
+dispatcher token before it expires and restart the service.
 
 ```dotenv
 APP_ENV=local
 # Blank/unset: disabled for local, enabled for other APP_ENV values.
 BROADCAST_ENABLED=
 DEVICES_API_EXPORT_DEVICE_STATUS_URL=https://your-backend/school_bus_cloud/WebSocketPusher/dispatch
-REAXIUM_API_USER=your_dispatcher_username
-REAXIUM_API_PASSWORD=your_dispatcher_password
+DISPATCHER_BEARER_TOKEN=your_cloud_dispatcher_token
 RABBITMQ_URL=amqp://guest:guest@127.0.0.1:5674/%2f
 REDIS_URL=redis://127.0.0.1:6381/
 DEVICE_STATUS_QUEUE=devicesAPIQueue
@@ -293,7 +294,7 @@ Success returns code `0` and an empty object array; code `3` with
 Do not resubmit that event. Requests are not deduplicated by trace ID.
 
 ```bash
-curl -i -u "$REAXIUM_API_USER:$REAXIUM_API_PASSWORD" \
+curl -i -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H 'Content-Type: application/json' \
   --data-binary @run-and-install/json/send-notification.example.json \
   "$BASE_URL/Alarm/sendNotification"
@@ -315,7 +316,7 @@ or send Vision packets, even if an `alert_message` or another notification type
 is supplied. Delivery failures retain the existing `database_saved: true` response.
 
 ```bash
-curl -i -u "$REAXIUM_API_USER:$REAXIUM_API_PASSWORD" \
+curl -i -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H 'Content-Type: application/json' \
   --data-binary @run-and-install/json/send-next-stop-notification.example.json \
   "$BASE_URL/Alarm/sendNextStopNotification"
@@ -341,7 +342,7 @@ writes and explicit delivery failure reporting (`database_saved: true` after a s
 event with incomplete publication). These operational behaviors differ from PHP.
 
 ```bash
-curl -i -u "$REAXIUM_API_USER:$REAXIUM_API_PASSWORD" \
+curl -i -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H 'Content-Type: application/json' \
   --data-binary @run-and-install/json/send-skipped-stop-notification.example.json \
   "$BASE_URL/Alarm/sendSkippedStopNotification"
@@ -525,12 +526,12 @@ when deriving the database host). Explicit pool settings are validated before st
 - DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD; alternatively Java's
   SCHOOL_BUS_DATASOURCE_URL (jdbc:mysql://host:port/database),
   SCHOOL_BUS_DATASOURCE_USERNAME and SCHOOL_BUS_DATASOURCE_PASSWORD.
-- REAXIUM_API_USER and REAXIUM_API_PASSWORD for the token endpoint, and REAXIUM_API_JWT_SECRET for signing tokens.
+- REAXIUM_API_JWT_SECRET for signing tokens. Login credentials are verified against the Cloud database.
 - RABBITMQ_USER and RABBITMQ_PASSWORD. They initialize the bundled broker and must
   continue to match existing broker storage. RabbitMQ and Redis have dedicated
   stack volumes and internal endpoints; host ports are not published.
-- DEVICES_API_EXPORT_DEVICE_STATUS_URL, REAXIUM_API_USER and
-  REAXIUM_API_PASSWORD for enabled HTTP broadcasts. BROADCAST_ENABLED
+- DEVICES_API_EXPORT_DEVICE_STATUS_URL and DISPATCHER_BEARER_TOKEN
+  for enabled HTTP broadcasts. BROADCAST_ENABLED
   defaults to true for DEV/PROD; set false in the bundle to disable it.
 - Existing optional DEVICE_STATUS_*, VISION_*, DB_* settings, DASHBOARD_BROADCAST_ENABLED,
   RABBITMQ_URL and REDIS_URL can also be supplied. Route dashboard broadcasts and
@@ -656,7 +657,7 @@ JWT bearer authentication, stricter validation, per-route transactions, explicit
 stop errors and downstream delivery reporting.
 
 ```bash
-curl -i -u "$REAXIUM_API_USER:$REAXIUM_API_PASSWORD" \
+curl -i -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H 'Content-Type: application/json' \
   --data-binary @run-and-install/json/begin-merged-route.example.json \
   "$BASE_URL/DeviceTraffic/beginAMergeRoute"
@@ -687,7 +688,7 @@ Delivery failures report per-route saved status while remaining routes continue.
 The response and operational differences from PHP match the merged-start endpoint.
 
 ```bash
-curl -i -u "$REAXIUM_API_USER:$REAXIUM_API_PASSWORD" \
+curl -i -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H 'Content-Type: application/json' \
   --data-binary @run-and-install/json/end-merged-route.example.json \
   "$BASE_URL/DeviceTraffic/endAMergedRoute"
@@ -726,7 +727,7 @@ Shared Rust authentication, validation, transaction and delivery reporting conve
 are retained; there is no transaction covering the complete request.
 
 ```bash
-curl -i -u "$REAXIUM_API_USER:$REAXIUM_API_PASSWORD" \
+curl -i -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H 'Content-Type: application/json' \
   --data-binary @run-and-install/json/interrupt-merged-route.example.json \
   "$BASE_URL/DeviceTraffic/interruptAMergedRoute"
@@ -781,7 +782,7 @@ sanitized error messages and explicit delivery reporting. It does not upsert or
 ignore duplicates: the database's existing unique key remains authoritative.
 
 ```bash
-curl -i -u "$REAXIUM_API_USER:$REAXIUM_API_PASSWORD" \
+curl -i -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H 'Content-Type: application/json' \
   --data-binary @run-and-install/json/user-access.example.json \
   "$BASE_URL/UserAccess/executeAnAccessOfAUserInABus"
@@ -927,7 +928,7 @@ TEST_RABBITMQ_URL='amqp://guest:guest@127.0.0.1:5672/%2f' \
 After rebuilding/restarting, test with valid IDs and a unique trace ID:
 
 ```sh
-curl -i --user "$REAXIUM_API_USER:$REAXIUM_API_PASSWORD" \
+curl -i -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H 'Content-Type: application/json' \
   --data-binary @run-and-install/json/traffic-attendance.example.json \
   'http://localhost:8080/api/Device/saveTrafficAttendance'
@@ -942,7 +943,7 @@ using the shared JWT bearer authentication. See
 `accessDate` (Unix milliseconds) with valid test values before sending:
 
 ```sh
-curl -i --user "$REAXIUM_API_USER:$REAXIUM_API_PASSWORD" \
+curl -i -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H 'Content-Type: application/json' \
   --data-binary @run-and-install/json/bulk-user-access.example.json \
   http://localhost:8080/api/DeviceAccess/bulkUserAccess
@@ -989,7 +990,7 @@ authorization decision.
 
 After commit, enriched traffic with Java's constant `ACCESS_TRAFFIC` label is sent
 to the HTTP WebSocket dispatcher. It uses `BROADCAST_ENABLED`, `APP_ENV`,
-`DEVICES_API_EXPORT_DEVICE_STATUS_URL` and the shared API credentials, following
+`DEVICES_API_EXPORT_DEVICE_STATUS_URL` and `DISPATCHER_BEARER_TOKEN`, following
 the status worker's configuration. Missing enrichment or HTTP failures are logged
 without retrying committed traffic. No Crisis/Vision call or direct parent
 notification is added. HTTP queue acceptance is not a database or broadcast result.
@@ -1042,7 +1043,7 @@ the application's Vault bundle before deploying. Changing it invalidates issued 
 Request a token with `POST /api/auth/token`, `Content-Type: application/json`:
 
 ```json
-{"username":"<REAXIUM_API_USER>","password":"<REAXIUM_API_PASSWORD>"}
+{"username":"<Cloud user_login_name>","password":"<Cloud password>"}
 ```
 
 A successful response is HTTP 200:
@@ -1052,14 +1053,24 @@ A successful response is HTTP 200:
 ```
 
 Invalid credentials return HTTP 401; malformed JSON or missing fields return HTTP 400.
-The existing credential environment aliases and `REAXIUM_API_PASSWORD_PREVIOUS` are
-accepted at login. Passwords are never included in tokens. Tokens use HS256 with
-validated expiration, issuer, audience and subject. Obtain a new token before its
-one-hour expiry; there is no refresh token endpoint. Password rotation affects new
-logins; already issued tokens remain valid until expiry or signing-secret rotation.
+Login queries the Cloud `user_access_data` table (singular, as mapped by
+ReaxiumCloud) using `user_login_name`, `access_type_id = 1`, and `status_id = 1`.
+The submitted password is verified against `user_hash_password` with bcrypt,
+including PHP's `$2y$` hashes. Passwords remain case sensitive; no plaintext
+fallback is used. Missing, invalid, or nonmatching hashes reject login.
+Database failures return HTTP 503 without issuing a token.
+
+The JWT subject is the matched Cloud `user_id`. Tokens use HS256 with validated
+expiration, issuer, audience and a nonempty subject. Obtain a new token before
+its one-hour expiry; there is no refresh token endpoint. Account/password changes
+affect subsequent logins; issued tokens remain valid until expiry or signing-secret
+rotation. The database account needs SELECT access to `user_access_data`.
+No configured login username/password or Basic authentication aliases are used.
+The signing secret continues to come from environment/Vault configuration.
+Outbound integrations use `DISPATCHER_BEARER_TOKEN`.
 Use HTTPS when sending credentials or bearer tokens outside localhost.
 
 Clients must obtain a token before calling protected endpoints. `test-api.sh` and
 the k6 route runner now perform this login automatically using the existing API
-username/password variables. Outbound dashboard/dispatcher authentication and the
+`CLOUD_USERNAME`/`CLOUD_PASSWORD` inputs containing valid Cloud account credentials. Outbound dashboard/dispatcher authentication and the
 k6 web control panel's own Basic login are separate and retain their existing behavior.

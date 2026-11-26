@@ -46,12 +46,12 @@ The exported IDs alone do not isolate your running application.
 
 ```bash
 export API_BASE_URL='https://YOUR_TEST_HOST/school_bus_cloud'
-export REAXIUM_API_USER='YOUR_TEST_API_USERNAME'
-read -r -s -p 'Test API password: ' REAXIUM_API_PASSWORD; echo
-export REAXIUM_API_PASSWORD
+export CLOUD_USERNAME='YOUR_TEST_API_USERNAME'
+read -r -s -p 'Test API password: ' CLOUD_PASSWORD; echo
+export CLOUD_PASSWORD
 export START_DATE='2026-10-22T08:00:00Z'
 VUS=8 JOURNEYS=100 ./run-and-install/load-test/run.sh run-and-install/devices.local.json
-unset REAXIUM_API_PASSWORD
+unset CLOUD_PASSWORD
 ```
 
 Requires Docker and Python 3. The wrapper uses the current OS user for reading the
@@ -281,12 +281,9 @@ excluded from Git and Docker builds; it is not printed in service logs.
 HTTP is unencrypted, including browser login and API credentials.
 
 
-The web runner automatically reads `REAXIUM_API_USER` and `REAXIUM_API_PASSWORD`
-from the project-root `.env` file. Exported environment variables take precedence.
-When both are configured, the page hides the credential fields and uses them on
-the server; it never sends these values to the browser. If either is missing,
-the page asks for both credentials. Use `--env-file /path/to/.env` to select another
-file. Restart the runner after changing credentials (rerun deployment on DEV).
+The web runner asks for Cloud username and password for each run. It does not
+load login credentials from `.env`, Vault, or the runtime configuration file.
+Database preparation settings still come from the configured database source.
 The DEV browser login (`runner` / Jenkins credential) remains separate.
 
 
@@ -451,7 +448,7 @@ For DEV, Jenkins reads `kv/reaxium_ci/device_api/<CLIENT>_<ENVIRONMENT>` and
 provisions `.k6-web/runtime-config.json` (directory mode 700, file mode 600).
 The web runner and preparation helper use `--config-file` to read that private
 JSON directly: `SCHOOL_BUS_DATASOURCE_URL`, `SCHOOL_BUS_DATASOURCE_USERNAME`,
-`SCHOOL_BUS_DATASOURCE_PASSWORD`, `REAXIUM_API_USER`, and `REAXIUM_API_PASSWORD`.
+`SCHOOL_BUS_DATASOURCE_PASSWORD`.
 DEV does not fall back to `.env` database credentials. JSON preserves raw Vault
 passwords without shell or dotenv expansion. Credentials are not sent to the
 browser or included in Docker command arguments. Redeploy with Jenkins to
